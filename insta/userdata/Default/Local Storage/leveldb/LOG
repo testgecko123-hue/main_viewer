@@ -1,6 +1,0 @@
-2026/06/08-00:36:59.713 a3b4 Reusing MANIFEST C:\Riot Games\VALORANT\binaries\H1736\insta\userdata\Default\Local Storage\leveldb/MANIFEST-000001
-2026/06/08-00:36:59.716 a3b4 Recovering log #179
-2026/06/08-00:36:59.718 a3b4 Reusing old log C:\Riot Games\VALORANT\binaries\H1736\insta\userdata\Default\Local Storage\leveldb/000179.log 
-2026/06/08-00:39:02.236 53ec Level-0 table #182: started
-2026/06/08-00:39:02.239 53ec Level-0 table #182: 14821 bytes OK
-2026/06/08-00:39:02.240 53ec Delete type=0 #179
