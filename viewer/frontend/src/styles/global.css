@@ -1,0 +1,89 @@
+:root {
+  --bg:       #0a0a0a;
+  --surface:  #111;
+  --surface2: #181818;
+  --surface3: #1f1f1f;
+  --border:   #222;
+  --border2:  #2a2a2a;
+  --accent:   #e8ff47;
+  --text:     #f0f0f0;
+  --muted:    #555;
+  --muted2:   #777;
+  --green:    #22c55e;
+  --blue:     #3b82f6;
+  --purple:   #7c3aed;
+  --red:      #dc2626;
+  --orange:   #f59e0b;
+
+  --nav-h:    52px;
+  --font-mono: 'DM Mono', 'Courier New', monospace;
+  --font-display: 'Syne', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* Utility */
+.muted   { color: var(--muted); }
+.accent  { color: var(--accent); }
+.green   { color: var(--green); }
+
+button {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+button:hover  { opacity: 0.85; }
+button:active { transform: scale(0.97); }
+
+.btn-accent  { background: var(--accent);  color: #000; font-weight: 600; }
+.btn-surface { background: var(--surface3); color: var(--text); border: 1px solid var(--border2); }
+.btn-danger  { background: var(--red);     color: #fff; }
+.btn-ghost   { background: transparent;    color: var(--muted); border: 1px solid var(--border); }
+.btn-ghost:hover { color: var(--text); border-color: var(--border2); }
+
+input, textarea {
+  background: #0d0d0d;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 8px 10px;
+  border-radius: 4px;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
