@@ -1,0 +1,6 @@
+2026/06/07-22:07:35.423 8544 Creating DB C:\Riot Games\VALORANT\binaries\H1736\insta\userdata\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb since it was missing.
+2026/06/07-22:07:35.429 8544 Reusing MANIFEST C:\Riot Games\VALORANT\binaries\H1736\insta\userdata\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/06/07-22:07:39.226 8528 Level-0 table #5: started
+2026/06/07-22:07:39.228 8528 Level-0 table #5: 14346 bytes OK
+2026/06/07-22:07:39.229 8528 Delete type=0 #3
+2026/06/07-22:07:39.229 85c4 Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)
