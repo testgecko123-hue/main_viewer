@@ -630,29 +630,25 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       </div>
 
       {/* ── Embed iframe (Pornhub etc) — full-screen, outside pointer-events:none div ── */}
-      {isEmbed && postData && (() => {
-        const embedUrl = postData.file_url || postData.cdn_url
-        const proxySrc = `/api/proxy/embed?url=${encodeURIComponent(embedUrl)}`
-        return (
-          <iframe
-            key={postData.id}
-            src={proxySrc}
-            frameBorder="0"
-            allowFullScreen
-            scrolling="no"
-            allow="autoplay; fullscreen"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              width: '100%',
-              height: '100%',
-              border: 'none',
-              zIndex: 2,
-              background: '#000',
-            }}
-          />
-        )
-      })()}
+      {isEmbed && postData && (
+        <iframe
+          key={postData.id}
+          src={postData.file_url || postData.cdn_url}
+          frameBorder="0"
+          allowFullScreen
+          scrolling="no"
+          allow="autoplay; fullscreen"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            border: 'none',
+            zIndex: 2,
+            background: '#000',
+          }}
+        />
+      )}
 
       {/* ── Top bar ── */}
       <div style={{
