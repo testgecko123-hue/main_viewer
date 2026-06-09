@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export default function TagGroups() {
   const [groups, setGroups]   = useState([])
@@ -8,6 +8,15 @@ export default function TagGroups() {
   const [newMembers, setNewMembers] = useState('')  // comma separated
   const [tagSearch, setTagSearch] = useState('')
   const [suggestions, setSugs] = useState([])
+  const tagSearchRef = useRef()
+
+  useEffect(() => {
+    function onPointerDown(e) {
+      if (!tagSearchRef.current?.contains(e.target)) setSugs([])
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [])
 
   useEffect(() => {
     loadGroups()
@@ -91,7 +100,7 @@ export default function TagGroups() {
         </div>
 
         {/* Tag search to find tags */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, position: 'relative' }}>
+        <div ref={tagSearchRef} style={{ display: 'flex', flexDirection: 'column', gap: 6, position: 'relative' }}>
           <label style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>ADD TAG FROM LIBRARY</label>
           <input value={tagSearch} onChange={e => setTagSearch(e.target.value)}
             placeholder="Search your tags..." />

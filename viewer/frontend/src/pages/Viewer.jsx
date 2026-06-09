@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import useIsMobile from '../hooks/useIsMobile.js'
-import { downloadForOwl } from '../utils/owlDownload.js'
 import { getActiveIndex, setActiveIndex } from '../utils/selectionUtils.js'
+import { EXTERNAL_IMG_PROPS, preloadImage } from '../utils/mediaUtils.js'
 
 // Ratio threshold above which an image is treated as a vertical comic strip
 const COMIC_RATIO = 2.5
@@ -47,7 +47,6 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
   const [autoMatch, setAutoMatch] = useState(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [autoMatchMsg, setAutoMatchMsg] = useState('')
-  const [owlStatus, setOwlStatus] = useState('')
   // Comic strip scroll mode
   const [isComicStrip, setIsComicStrip] = useState(false)
   const [comicOverride, setComicOverride] = useState(null) // true/false = manual override, null = auto
@@ -88,11 +87,19 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
   const [cache, setCache] = useState({})
 
   // ── Derived: is current image in comic strip mode? ────────────────────────
+  const isComic = postData?.media_type === 'comic'
   const comicPages = (() => {
     const pages = postData?.source_meta?.pages
+    if (isComic) {
+      // comic media_type: use stored pages array, or wrap the single file_url
+      // so the carousel UI always activates for this type
+      if (Array.isArray(pages) && pages.length > 0) return pages
+      const url = postData?.file_url || postData?.cdn_url
+      return url ? [url] : []
+    }
     return Array.isArray(pages) && pages.length > 1 ? pages : []
   })()
-  const comicCarouselActive = comicPages.length > 1
+  const comicCarouselActive = isComic || comicPages.length > 1
   const comicActive = !comicCarouselActive && (comicOverride !== null ? comicOverride : isComicStrip)
   const comicImageUrl = comicCarouselActive
     ? comicPages[comicPageIdx]
@@ -194,8 +201,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     const nextId = ids[idx + 1]
     const nextPost = cache[nextId]
     if (nextPost && nextPost.media_type === 'image') {
-      const img = new Image()
-      img.src = nextPost.file_url || nextPost.cdn_url
+      preloadImage(nextPost.file_url || nextPost.cdn_url)
     }
   }, [postData, idx, ids, cache])
 
@@ -228,14 +234,17 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       }
 
       // Step 2: preload image bytes into browser cache
-      if (!preloadCancelRef.current && post.media_type === 'image') {
-        const src = post.file_url || post.cdn_url
-        if (src) {
+      if (!preloadCancelRef.current && (post.media_type === 'image' || post.media_type === 'comic')) {
+        const pages = post.media_type === 'comic'
+          ? (post.source_meta?.pages?.length ? post.source_meta.pages : [post.file_url || post.cdn_url])
+          : [post.file_url || post.cdn_url]
+        for (const src of pages.filter(Boolean)) {
+          if (preloadCancelRef.current) break
           await new Promise(resolve => {
-            const img = new Image()
+            const img = preloadImage(src)
+            if (!img) return resolve()
             img.onload = resolve
             img.onerror = resolve
-            img.src = src
           })
         }
       }
@@ -368,10 +377,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     setImgLoaded(false)
     setProgress(0)
     ;[comicPageIdx + 1, comicPageIdx - 1].forEach(pi => {
-      if (pi >= 0 && pi < comicPages.length) {
-        const img = new Image()
-        img.src = comicPages[pi]
-      }
+      if (pi >= 0 && pi < comicPages.length) preloadImage(comicPages[pi])
     })
   }, [comicCarouselActive, comicPageIdx, comicPages])
 
@@ -412,22 +418,10 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     </div>
   )
 
-  const isVideo = postData?.media_type === 'video' || postData?.media_type === 'vr'
+  const isVideo = (postData?.media_type === 'video' || postData?.media_type === 'vr') && !isComic
   const isVr = postData?.media_type === 'vr'
   const videoSrc = postData?.file_url || postData?.cdn_url
   const canPlayVideo = isVideo && videoSrc && !videoError
-
-  async function exportOwl(variant) {
-    if (!postData?.id) return
-    setOwlStatus('Downloading…')
-    try {
-      await downloadForOwl(postData.id, variant)
-      setOwlStatus('Saved video + .vault.json')
-      setTimeout(() => setOwlStatus(''), 4000)
-    } catch (e) {
-      setOwlStatus(e.message || 'Download failed')
-    }
-  }
 
   // Preload bar colours
   const preloadPct = preloadState
@@ -435,13 +429,14 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     : 0
 
   return (
-    <div 
- 	style={overlay}
-	onTouchStart={e => { onTouchStart(e); if (isVideo) showControls() }}
-	onTouchEnd={onTouchEnd}
-	onClick={e => {if (e.target == e.currentTarget) setInfo(v => !v) }}
-  onMouseMove={isVideo ? showControls : undefined}
-   >
+    <div
+      data-viewer-overlay
+      style={overlay}
+      onTouchStart={e => { onTouchStart(e); if (isVideo) showControls() }}
+      onTouchEnd={onTouchEnd}
+      onClick={e => { if (e.target === e.currentTarget) setInfo(v => !v) }}
+      onMouseMove={isVideo ? showControls : undefined}
+    >
 
       {/* ── Progress bar (image load) ── */}
       {!imgLoaded && postData?.media_type === 'image' && (
@@ -462,9 +457,13 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         </div>
       )}
 
-      {/* ── Media area ── */}
-      <div style={{ width: '100%', height: '100%', display: 'flex',
-        alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+      {/* ── Media area (pointer-events pass through; media elements re-enable) ── */}
+      <div style={{
+        width: '100%', height: '100%', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        position: 'absolute', inset: 0, zIndex: 1,
+        pointerEvents: 'none',
+      }}>
 
         {loading && (
           <div style={{ position: 'absolute', color: 'var(--muted)', fontSize: '0.7rem' }}>
@@ -477,6 +476,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
           <img
             src={postData.thumb_cdn || postData.cdn_url}
             alt=""
+            {...EXTERNAL_IMG_PROPS}
             style={{
               position: 'absolute',
               width: '100%',
@@ -485,6 +485,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               maxHeight: isMobile ? '100vh' : '100%',
               display: 'block',
               userSelect: 'none',
+              pointerEvents: 'auto',
             }}
           />
         )}
@@ -495,17 +496,17 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
             key={comicCarouselActive ? `${postData.id}-${comicPageIdx}` : postData.id}
             src={comicImageUrl}
             alt=""
+            {...EXTERNAL_IMG_PROPS}
             style={{
               width: '100%',
               height: '100%',
               objectFit: 'contain',
-	      maxHeight: isMobile ? '100vh' : '100%',
+              maxHeight: isMobile ? '100vh' : '100%',
               display: 'block',
               userSelect: 'none',
               opacity: imgLoaded ? 1 : 0,
               transition: 'opacity 0.2s',
-              position: 'relative',
-              zIndex: 1,
+              pointerEvents: 'auto',
             }}
             onLoad={e => {
               setImgLoaded(true)
@@ -532,7 +533,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               overflowY: 'auto',
               overflowX: 'hidden',
               flexShrink: 0,
-              // Subtle scrollbar styling
+              pointerEvents: 'auto',
               scrollbarWidth: 'thin',
               scrollbarColor: 'var(--border2) transparent',
             }}
@@ -541,6 +542,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               <img
                 src={postData.thumb_cdn || postData.cdn_url}
                 alt=""
+                {...EXTERNAL_IMG_PROPS}
                 style={{
                   width: '100%',
                   height: 'auto',
@@ -553,6 +555,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               key={postData.id}
               src={postData.file_url || postData.cdn_url}
               alt=""
+              {...EXTERNAL_IMG_PROPS}
               style={{
                 width: '100%',
                 height: 'auto',
@@ -594,6 +597,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               objectFit: 'contain',
               outline: 'none',
               maxHeight: isMobile ? '100vh' : '100%',
+              pointerEvents: 'auto',
             }}
             onLoadedData={() => {
               setImgLoaded(true)
@@ -618,12 +622,11 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       </div>
 
       {/* ── Top bar ── */}
-     <div style={{
-         position: 'absolute', top: 0, left: 0, right: 0,
-         padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12,
-         background: 'linear-gradient(to bottom, rgba(0,0,0,0.75), transparent)',
-         pointerEvents: 'none',
-       }}>
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50,
+        padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12,
+        background: 'linear-gradient(to bottom, rgba(0,0,0,0.75), transparent)',
+      }}>
         <span style={{ fontFamily: 'var(--font-display)', color: 'var(--accent)',
           fontSize: '0.85rem', fontWeight: 800 }}>VIEWER</span>
         <span style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>
@@ -647,7 +650,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         {comicCarouselActive && (
           <span style={{ background: 'rgba(139,92,246,0.25)', border: '1px solid rgba(139,92,246,0.5)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: '#c4b5fd' }}>
-            COMIC {comicPageIdx + 1}/{comicPages.length}
+            {isComic ? '📖' : '🖼'} {comicPageIdx + 1}/{comicPages.length}
           </span>
         )}
         {comicActive && (
@@ -673,8 +676,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
 
         <div style={{ flex: 1 }} />
 
-        {/* Action buttons — pointer events active */}
-        <div style={{ pointerEvents: 'all', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
 
           {isMobile ? (
             <button
@@ -687,8 +689,8 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
           ) : (
             <>
 
-          {/* Comic strip toggle — only for images */}
-          {postData && !isVideo && (
+          {/* Comic strip toggle — only for non-comic images */}
+          {postData && !isVideo && !isComic && (
             <button
               className="btn-ghost"
               title={comicActive ? 'Switch to normal view' : 'Switch to comic strip scroll mode'}
@@ -701,25 +703,6 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               📜 {comicActive ? 'NORMAL' : 'SCROLL'}
             </button>
           )}
-
-          {isVideo && (
-            <>
-              <button className="btn-ghost" title="Download 2D video + metadata for OWL 3D"
-                onClick={e => { e.stopPropagation(); exportOwl('2d') }}
-                style={{ padding: '4px 10px', fontSize: '0.65rem' }}>
-                OWL 2D ↓
-              </button>
-              <button className="btn-ghost" title="Download VR video + metadata"
-                onClick={e => { e.stopPropagation(); exportOwl('vr') }}
-                style={{ padding: '4px 10px', fontSize: '0.65rem' }}>
-                OWL VR ↓
-              </button>
-            </>
-          )}
-          {owlStatus && (
-            <span style={{ fontSize: '0.62rem', color: 'var(--accent)' }}>{owlStatus}</span>
-          )}
-
           {/* Preload all button */}
           {!preloadState && (
             <button className="btn-ghost"
@@ -755,7 +738,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
         background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)',
         fontSize: '2rem', padding: '20px 16px', cursor: 'pointer',
-        transition: 'color 0.15s', zIndex: 10,
+        transition: 'color 0.15s', zIndex: 50,
       }}
         onMouseEnter={e => e.target.style.color = 'rgba(255,255,255,0.9)'}
         onMouseLeave={e => e.target.style.color = 'rgba(255,255,255,0.3)'}
@@ -764,7 +747,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
         background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)',
         fontSize: '2rem', padding: '20px 16px', cursor: 'pointer',
-        transition: 'color 0.15s', zIndex: 10,
+        transition: 'color 0.15s', zIndex: 50,
       }}
         onMouseEnter={e => e.target.style.color = 'rgba(255,255,255,0.9)'}
         onMouseLeave={e => e.target.style.color = 'rgba(255,255,255,0.3)'}
@@ -777,7 +760,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
           onTouchStart={showControls}
           style={{
             position: 'absolute', bottom: showInfo ? 'calc(35vh + 1px)' : 0,
-            left: 0, right: 0, zIndex: 25,
+            left: 0, right: 0, zIndex: 60,
             background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%)',
             padding: isMobile ? '32px 16px 18px' : '28px 20px 14px',
             display: 'flex', flexDirection: 'column', gap: isMobile ? 10 : 8,
@@ -897,7 +880,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0,
           background: 'rgba(10,10,10,0.95)', borderTop: '1px solid var(--border)',
-          padding: '16px 20px', maxHeight: '35vh', overflowY: 'auto', zIndex: 20,
+          padding: '16px 20px', maxHeight: '35vh', overflowY: 'auto', zIndex: 55,
         }}>
           <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 12 }}>
             <div style={{ fontSize: '0.68rem', lineHeight: 2, color: 'var(--muted)' }}>
@@ -1066,7 +1049,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       }}
     >
 
-      {postData && !isVideo && !comicCarouselActive && (
+      {postData && !isVideo && !isComic && !comicCarouselActive && (
         <button
           className="btn-surface"
           onClick={() => {
@@ -1101,18 +1084,6 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
           ✕ CANCEL PRELOAD
         </button>
       )}
-
-      {isVideo && (
-        <>
-          <button className="btn-surface" onClick={() => { exportOwl('2d'); setMobileMenuOpen(false) }}>
-            OWL 3D — download 2D + metadata
-          </button>
-          <button className="btn-surface" onClick={() => { exportOwl('vr'); setMobileMenuOpen(false) }}>
-            OWL 3D — download VR + metadata
-          </button>
-        </>
-      )}
-
       <button
         className="btn-surface"
         onClick={() => {

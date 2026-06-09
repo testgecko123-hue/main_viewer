@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import TagSearch from '../components/TagSearch.jsx'
 import PostGrid from '../components/PostGrid.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
+import { EXTERNAL_IMG_PROPS, parseSourceMeta, postThumbUrl } from '../utils/mediaUtils.js'
 
 const LIMIT = 60
 
@@ -14,7 +15,7 @@ export default function Library({ selection, setSelection, openViewer }) {
   const [mediaType, setMedia]   = useState('')
   const [sourceType, setSourceType] = useState('')
   const [mediaCategory, setMediaCategory] = useState('')
-  const [order, setOrder]       = useState('newest')  // default: newest first
+  const [order, setOrder]       = useState('saved_newest')
   const [posts, setPosts]       = useState([])
   const [total, setTotal]       = useState(0)
   const [offset, setOffset]     = useState(0)
@@ -99,6 +100,29 @@ export default function Library({ selection, setSelection, openViewer }) {
     setSelection(s => ({ ...s, ids: newIds }))
   }
 
+  async function importMedia() {
+    const url = importUrl.trim()
+    if (!url) return
+    setImporting(true)
+    setImportStatus(null)
+    try {
+      const res = await fetch('/api/posts/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Import failed')
+      setImportStatus(data.status === 'already_saved' ? 'Already in library' : 'Added to library')
+      setImportUrl('')
+      if (order !== 'saved_newest') setOrder('saved_newest')
+      else await doSearch(true)
+    } catch (e) {
+      setImportStatus(e.message || 'Import failed')
+    }
+    setImporting(false)
+  }
+
   function viewSelected() {
     if (selected.size === 0) return
     const selectedIds = posts.filter(p => selected.has(p.id)).map(p => p.id)
@@ -118,6 +142,9 @@ export default function Library({ selection, setSelection, openViewer }) {
   const [r34UpdateMsg, setR34Msg]         = useState('')
   const [autoMatch, setAutoMatch]         = useState(null)   // { loading, candidates, search_tags, post_id }
   const [autoMatchMsg, setAutoMatchMsg]   = useState('')
+  const [importUrl, setImportUrl]         = useState('')
+  const [importStatus, setImportStatus]   = useState(null)
+  const [importing, setImporting]         = useState(false)
 
   async function autoSearch(postId) {
     setAutoMatch({ loading: true, candidates: [], search_tags: [], post_id: postId })
@@ -251,6 +278,35 @@ export default function Library({ selection, setSelection, openViewer }) {
           onSearch={() => doSearch(true)}
         />
 
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8,
+          borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--muted)', letterSpacing: '0.08em' }}>
+            ADD MEDIA
+          </div>
+          <div style={{ fontSize: '0.62rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+            Direct image/video URL, rule34.xxx, rule34hub.com, or multporn.net post link.
+          </div>
+          <input
+            value={importUrl}
+            onChange={e => { setImportUrl(e.target.value); setImportStatus(null) }}
+            onKeyDown={e => e.key === 'Enter' && importMedia()}
+            placeholder="https://…"
+            style={{ fontSize: '0.72rem' }}
+          />
+          <button className="btn-surface" onClick={importMedia} disabled={importing || !importUrl.trim()}
+            style={{ width: '100%', opacity: importing ? 0.6 : 1 }}>
+            {importing ? 'IMPORTING…' : '+ IMPORT URL'}
+          </button>
+          {importStatus && (
+            <div style={{
+              fontSize: '0.65rem',
+              color: importStatus.startsWith('Already') ? 'var(--muted)' : 'var(--green)',
+            }}>
+              {importStatus}
+            </div>
+          )}
+        </div>
+
         {/* Filters */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: '0.72rem', color: 'var(--muted)', letterSpacing: '0.08em' }}>FILTERS</div>
@@ -267,20 +323,31 @@ export default function Library({ selection, setSelection, openViewer }) {
             <option value="carousel">Carousels</option>
           </select>
 
+          <select value={sourceType} onChange={e => setSourceType(e.target.value)}
+            style={{ background: '#0d0d0d', border: '1px solid var(--border)', color: 'var(--text)',
+              fontFamily: 'var(--font-mono)', fontSize: '0.78rem', padding: '9px 10px', borderRadius: 4 }}>
+            <option value="">All sources</option>
+            <option value="rule34">Rule34</option>
+            <option value="rule34hub">Rule34hub</option>
+            <option value="multporn">Multporn</option>
+            <option value="manual">Imported links</option>
+          </select>
+
           <select value={mediaCategory} onChange={e => setMediaCategory(e.target.value)}
             style={{ background: '#0d0d0d', border: '1px solid var(--border)', color: 'var(--text)',
               fontFamily: 'var(--font-mono)', fontSize: '0.78rem', padding: '9px 10px', borderRadius: 4 }}>
             <option value="">All categories</option>
-            <option value="library">Library (Rule34)</option>
+            <option value="library">Library</option>
+            <option value="imported">Imported</option>
           </select>
 
           <select value={order} onChange={e => setOrder(e.target.value)}
             style={{ background: '#0d0d0d', border: '1px solid var(--border)', color: 'var(--text)',
               fontFamily: 'var(--font-mono)', fontSize: '0.78rem', padding: '9px 10px', borderRadius: 4 }}>
-            <option value="newest">Upload date ↓ (newest)</option>
-            <option value="oldest">Upload date ↑ (oldest)</option>
-            <option value="saved_newest">Date saved ↓ (newest)</option>
-            <option value="saved_oldest">Date saved ↑ (oldest)</option>
+            <option value="saved_newest">Date added ↓ (newest)</option>
+            <option value="saved_oldest">Date added ↑ (oldest)</option>
+            <option value="newest">R34 post ID ↓</option>
+            <option value="oldest">R34 post ID ↑</option>
             <option value="random">Random</option>
           </select>
         </div>
@@ -365,13 +432,34 @@ export default function Library({ selection, setSelection, openViewer }) {
           </div>
 
           <div style={{ borderRadius: 4, overflow: 'hidden', background: 'var(--surface2)' }}>
-            <img src={detail.thumb_cdn} alt="" style={{ width: '100%', display: 'block' }}
-              onError={e => e.target.style.display = 'none'} />
+            {detail.media_type === 'comic' && parseSourceMeta(detail).pages?.length > 0 ? (
+              <div style={{ position: 'relative' }}>
+                <img src={parseSourceMeta(detail).pages[0]} alt=""
+                  {...EXTERNAL_IMG_PROPS}
+                  style={{ width: '100%', display: 'block' }}
+                  onError={e => { e.target.src = postThumbUrl(detail); }} />
+                <div style={{
+                  position: 'absolute', bottom: 4, right: 4,
+                  background: 'rgba(139,92,246,0.85)', borderRadius: 3,
+                  padding: '2px 6px', fontSize: '0.6rem', color: '#fff',
+                }}>📖 {parseSourceMeta(detail).pages.length}p</div>
+              </div>
+            ) : (
+              <img src={postThumbUrl(detail)} alt="" style={{ width: '100%', display: 'block' }}
+                {...EXTERNAL_IMG_PROPS}
+                onError={e => e.target.style.display = 'none'} />
+            )}
           </div>
 
           <div style={{ fontSize: '0.68rem', lineHeight: 2, color: 'var(--muted)' }}>
             <div><span style={{ color: 'var(--text)' }}>ID</span> {detail.rule34hub_id || detail.id}</div>
             <div><span style={{ color: 'var(--text)' }}>Type</span> {detail.media_type}</div>
+            {detail.source_type && (
+              <div><span style={{ color: 'var(--text)' }}>Source</span> {detail.source_type}</div>
+            )}
+            {detail.created_at && (
+              <div><span style={{ color: 'var(--text)' }}>Added</span> {new Date(detail.created_at).toLocaleString()}</div>
+            )}
             {detail.media_category && detail.media_category !== 'library' && (
               <div><span style={{ color: 'var(--text)' }}>Category</span> {detail.media_category}</div>
             )}
@@ -379,6 +467,9 @@ export default function Library({ selection, setSelection, openViewer }) {
               <div><span style={{ color: 'var(--text)' }}>Source</span> {detail.source_type}</div>
             )}
             {detail.width && <div><span style={{ color: 'var(--text)' }}>Size</span> {detail.width}×{detail.height}</div>}
+            {detail.media_type === 'comic' && parseSourceMeta(detail).pages && (
+              <div><span style={{ color: 'var(--text)' }}>Pages</span> {parseSourceMeta(detail).pages.length}</div>
+            )}
             {detail.source && <div><a href={detail.source} target="_blank" rel="noreferrer">Source ↗</a></div>}
           </div>
 

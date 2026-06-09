@@ -6,6 +6,7 @@ import {
   setActiveIds,
   newSubsetId,
 } from '../utils/selectionUtils.js'
+import { EXTERNAL_IMG_PROPS, postThumbUrl } from '../utils/mediaUtils.js'
 
 export default function Selection({ selection, setSelection, openViewer, saveStatus }) {
   const isMobile = useIsMobile()
@@ -19,6 +20,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
   const [newColName, setNewColName] = useState('')
   const [removeTagInput, setRemoveTagInput] = useState('')
   const [removeTagSugs, setRemoveTagSugs]   = useState([])
+  const removeTagRef = useRef()
   const [newSubsetName, setNewSubsetName] = useState('')
   const [dragIdx, setDragIdx] = useState(null)
   const [dropIdx, setDropIdx] = useState(null)
@@ -52,6 +54,14 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
 
   useEffect(() => {
     fetch('/api/collections').then(r => r.json()).then(setCols)
+  }, [])
+
+  useEffect(() => {
+    function onPointerDown(e) {
+      if (!removeTagRef.current?.contains(e.target)) setRemoveTagSugs([])
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [])
 
   useEffect(() => {
@@ -173,6 +183,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
 
   useEffect(() => {
     function onKey(e) {
+      if (document.querySelector('[data-viewer-overlay]')) return
       if (e.target.tagName === 'INPUT') return
       if (e.key === 'Backspace' && focused) {
         removePost(focused)
@@ -318,7 +329,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8,
+        <div ref={removeTagRef} style={{ display: 'flex', flexDirection: 'column', gap: 8,
           borderTop: '1px solid var(--border)', paddingTop: 16, position: 'relative' }}>
           <div style={{ fontSize: '0.72rem', color: 'var(--muted)', letterSpacing: '0.08em' }}>
             REMOVE ALL WITH TAG
@@ -472,7 +483,8 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
                 opacity: dragIdx === idx ? 0.45 : 1,
               }}
             >
-              <img src={post.thumb_cdn} alt=""
+              <img src={postThumbUrl(post)} alt=""
+                {...EXTERNAL_IMG_PROPS}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', pointerEvents: 'none' }}
                 onError={e => e.target.style.display = 'none'} />
 

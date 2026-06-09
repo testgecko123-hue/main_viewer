@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 import json
 import requests
 import urllib.parse
+from datetime import date, datetime
 from flask import Flask, jsonify, request, make_response, Response
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from database import (
     init_db, get_db,
@@ -32,32 +34,27 @@ from database import (
     get_feed_posts, upsert_feed_post, set_feed_post_status,
     infer_rule34_media_type,
     expand_tags_with_groups,
+    import_post,
 )
+from media_import import resolve_import_url
 
 app = Flask(__name__)
+
+
+class _AppJSON(DefaultJSONProvider):
+    def default(self, o):
+        if isinstance(o, (datetime, date)):
+            return o.isoformat()
+        return super().default(o)
+
+
+app.json = _AppJSON(app)
 CORS(app)  # allow React dev server to call the API
 
 R34_API   = "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index"
 API_KEY   = "e4bbcb7881e3f87ce9c4289526dd6343ad2792022fa1b3cc41464030d05fca703565fbe627cb296ffce35e8422549e07d0bb9b94fd87433af5b6a94cc9702257"
 USER_ID   = 4878639
 HEADERS   = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-init_db()
-
-# ── Ensure last_fetched_at column exists on subscriptions ────────────────────
-def _migrate_subscriptions():
-    """Add last_fetched_at column to subscriptions if it doesn't exist yet."""
-    db = get_db()
-    try:
-        db.execute("ALTER TABLE subscriptions ADD COLUMN last_fetched_at REAL DEFAULT NULL")
-        db.commit()
-        logger.info("Migrated subscriptions: added last_fetched_at column")
-    except Exception:
-        pass  # Column already exists
-    finally:
-        db.close()
-
-_migrate_subscriptions()
 
 # How recent a tag fetch must be to be skipped (seconds). 8 minutes.
 SKIP_IF_FETCHED_WITHIN_SECS = 8 * 60
@@ -145,81 +142,10 @@ def api_post(post_id):
 @app.route('/api/posts/<int:post_id>', methods=['DELETE'])
 def api_delete_post(post_id):
     db = get_db()
-    db.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+    db.execute("DELETE FROM posts WHERE id = %s", (post_id,))
     db.commit()
     db.close()
     return jsonify({"status": "ok"})
-
-
-@app.route('/api/posts/<int:post_id>/owl-export')
-def api_post_owl_export(post_id):
-    """Metadata sidecar + download path for OWL 3D export."""
-    from owl_export import build_owl_reference, export_filenames, resolve_variant_url
-
-    variant = request.args.get('variant', 'auto')
-    db = get_db()
-    post = get_post_with_tags(db, post_id)
-    db.close()
-    if not post:
-        return jsonify({"error": "not found"}), 404
-
-    url, resolved = resolve_variant_url(post, variant)
-    if not url:
-        return jsonify({"error": f"No {variant} video URL on this post"}), 404
-
-    download_path = f"/api/posts/{post_id}/download?variant={resolved}"
-    video_name, sidecar_name = export_filenames(post, variant, url)
-    reference = build_owl_reference(post, variant, url)
-    reference['video_filename'] = video_name
-    reference['sidecar_filename'] = sidecar_name
-
-    return jsonify({
-        "post_id": post_id,
-        "variant": resolved,
-        "video_filename": video_name,
-        "sidecar_filename": sidecar_name,
-        "download_path": download_path,
-        "reference": reference,
-    })
-
-
-@app.route('/api/posts/<int:post_id>/download')
-def api_post_download(post_id):
-    """Stream video file to the browser as a download."""
-    from owl_export import export_filenames, resolve_variant_url
-
-    variant = request.args.get('variant', 'auto')
-    db = get_db()
-    post = get_post_with_tags(db, post_id)
-    db.close()
-    if not post:
-        return jsonify({"error": "not found"}), 404
-
-    url, resolved = resolve_variant_url(post, variant)
-    if not url or not url.startswith('http'):
-        return jsonify({"error": "no downloadable URL"}), 404
-
-    video_name, _ = export_filenames(post, variant, url)
-    try:
-        upstream = requests.get(
-            url,
-            headers={'User-Agent': HEADERS['User-Agent']},
-            stream=True,
-            timeout=120,
-        )
-        upstream.raise_for_status()
-        excluded = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
-        headers = [(k, v) for k, v in upstream.headers.items() if k.lower() not in excluded]
-        headers.append(('Content-Disposition', f'attachment; filename="{video_name}"'))
-        headers.append(('Access-Control-Allow-Origin', '*'))
-        return Response(
-            upstream.iter_content(chunk_size=65536),
-            status=upstream.status_code,
-            headers=headers,
-        )
-    except Exception as e:
-        logger.warning('download failed for post %s: %s', post_id, e)
-        return jsonify({"error": str(e)}), 502
 
 import re as _re
 
@@ -229,11 +155,11 @@ def _get_post_with_tags_inline(db, post_id):
         SELECT p.id, p.rule34hub_id, p.rule34_api_id, p.file_url, p.cdn_url,
                p.thumb_cdn, p.media_type, p.width, p.height, p.source,
                p.hub_url, p.status,
-               GROUP_CONCAT(t.name, '|||') as tag_str
+               STRING_AGG(t.name, '|||' ORDER BY t.name) as tag_str
         FROM posts p
         LEFT JOIN post_tags pt ON pt.post_id = p.id
         LEFT JOIN tags t ON t.id = pt.tag_id
-        WHERE p.id = ?
+        WHERE p.id = %s
         GROUP BY p.id
     """, (post_id,)).fetchone()
     if not row:
@@ -266,19 +192,22 @@ def _apply_r34_to_post(db, post_id, r34):
 
     db.execute("""
         UPDATE posts
-        SET file_url      = ?,
-            rule34_api_id = ?
-        WHERE id = ?
+        SET file_url      = %s,
+            rule34_api_id = %s
+        WHERE id = %s
     """, (file_url, r34_id, post_id))
 
-    db.execute("DELETE FROM post_tags WHERE post_id = ?", (post_id,))
+    db.execute("DELETE FROM post_tags WHERE post_id = %s", (post_id,))
     for tag in new_tags:
-        db.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
-        row = db.execute("SELECT id FROM tags WHERE name = ?", (tag,)).fetchone()
+        db.execute(
+            "INSERT INTO tags (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+            (tag,),
+        )
+        row = db.execute("SELECT id FROM tags WHERE name = %s", (tag,)).fetchone()
         if row:
             db.execute(
-                "INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?, ?)",
-                (post_id, row[0])
+                "INSERT INTO post_tags (post_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (post_id, row['id']),
             )
     db.commit()
     return new_tags, r34_id
@@ -355,11 +284,11 @@ def api_auto_match(post_id):
     # Get post's current tags + thumb from DB
     row = db.execute("""
         SELECT p.id, p.thumb_cdn, p.cdn_url, p.source, p.file_url,
-               GROUP_CONCAT(t.name, ' ') as tag_str
+               STRING_AGG(t.name, ' ' ORDER BY t.name) as tag_str
         FROM posts p
         LEFT JOIN post_tags pt ON pt.post_id = p.id
         LEFT JOIN tags t ON t.id = pt.tag_id
-        WHERE p.id = ?
+        WHERE p.id = %s
         GROUP BY p.id
     """, (post_id,)).fetchone()
     db.close()
@@ -518,10 +447,11 @@ def api_posts_by_ids():
     if not ids:
         return jsonify([])
     db = get_db()
-    placeholders = ','.join('?' * len(ids))
+    placeholders = ','.join(['%s'] * len(ids))
+    from database import _parse_post_row
     rows = db.execute(f"SELECT * FROM posts WHERE id IN ({placeholders})", ids).fetchall()
     db.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify([_parse_post_row(r) for r in rows])
 
 @app.route('/api/posts/random')
 def api_random():
@@ -576,10 +506,10 @@ def api_tags_search():
         SELECT t.name, COUNT(pt.post_id) as count
         FROM tags t
         LEFT JOIN post_tags pt ON pt.tag_id = t.id
-        WHERE t.name LIKE ?
-        GROUP BY t.id
+        WHERE t.name LIKE %s
+        GROUP BY t.id, t.name
         ORDER BY count DESC
-        LIMIT ?
+        LIMIT %s
     """, (f'%{q}%', limit)).fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
@@ -691,7 +621,7 @@ def api_collection_review_action(col_id):
 @app.route('/api/collections/<int:col_id>', methods=['DELETE'])
 def api_delete_collection(col_id):
     db = get_db()
-    db.execute("DELETE FROM collections WHERE id = ?", (col_id,))
+    db.execute("DELETE FROM collections WHERE id = %s", (col_id,))
     db.commit()
     db.close()
     return jsonify({"status": "ok"})
@@ -805,13 +735,13 @@ def api_put_current_selection():
         ).fetchone()
         if existing:
             db.execute(
-                "UPDATE selections SET post_ids = ? WHERE name = '__current__'",
-                (stored,)
+                "UPDATE selections SET post_ids = %s WHERE name = '__current__'",
+                (stored,),
             )
         else:
             db.execute(
-                "INSERT INTO selections (name, post_ids, is_saved) VALUES ('__current__', ?, 0)",
-                (stored,)
+                "INSERT INTO selections (name, post_ids, is_saved) VALUES ('__current__', %s, 0)",
+                (stored,),
             )
         db.commit()
         return jsonify({"status": "ok", "count": len(ids), "index": index})
@@ -898,9 +828,9 @@ def api_subscriptions_browse():
         return jsonify({"error": str(e), "posts": [], "total": 0}), 500
 
     # Get all rule34_api_ids already in local library for filtering
-    owned = set(row[0] for row in db.execute(
+    owned = {row['rule34_api_id'] for row in db.execute(
         "SELECT rule34_api_id FROM posts WHERE rule34_api_id IS NOT NULL"
-    ).fetchall())
+    ).fetchall()}
     db.close()
 
     posts = []
@@ -919,6 +849,21 @@ def api_subscriptions_browse():
         })
 
     return jsonify({"posts": posts, "total": len(posts), "page": page})
+
+def _get_owned_rule34_ids(db):
+    """Rule34 post IDs already in the local library (api + hub columns)."""
+    owned = set()
+    rows = db.execute(
+        "SELECT rule34_api_id, rule34hub_id FROM posts "
+        "WHERE rule34_api_id IS NOT NULL OR rule34hub_id IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        for key in ('rule34_api_id', 'rule34hub_id'):
+            val = row.get(key)
+            if val is not None:
+                owned.add(int(val))
+    return owned
+
 
 def _fetch_tag_posts(db, tag, sub_tags, owned_ids):
     """
@@ -967,7 +912,7 @@ def _fetch_tag_posts(db, tag, sub_tags, owned_ids):
     if not pids:
         return 0, 0, None
 
-    placeholders = ','.join('?' * len(pids))
+    placeholders = ','.join(['%s'] * len(pids))
     existing_rows = db.execute(
         f"SELECT rule34_post_id, status FROM feed_posts WHERE rule34_post_id IN ({placeholders})",
         pids
@@ -979,8 +924,12 @@ def _fetch_tag_posts(db, tag, sub_tags, owned_ids):
     added_new = 0
 
     for post in results:
-        pid = post.get('id')
-        if not pid:
+        raw_pid = post.get('id')
+        if not raw_pid:
+            continue
+        try:
+            pid = int(raw_pid)
+        except (TypeError, ValueError):
             continue
         file_url  = post.get('file_url', '')
         preview   = post.get('preview_url', '')
@@ -995,12 +944,14 @@ def _fetch_tag_posts(db, tag, sub_tags, owned_ids):
                 db.execute("""
                     INSERT INTO feed_posts
                         (rule34_post_id, file_url, preview_url, media_type, tags, matched_subs, post_date, status)
-                    VALUES (?,?,?,?,?,?,?,'owned')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'owned')
                 """, (pid, file_url, preview, media_type, json.dumps(tags_list), json.dumps(matched), post_date))
                 existing_map[pid] = 'owned'
         else:
             if pid not in existing_map:
-                upsert_feed_post(db, pid, file_url, preview, tags_list, matched, post_date)
+                upsert_feed_post(
+                    db, pid, file_url, preview, tags_list, matched, post_date, commit=False,
+                )
                 existing_map[pid] = 'unseen'
                 added_new += 1
             # Don't overwrite posts already actioned by the user
@@ -1009,7 +960,7 @@ def _fetch_tag_posts(db, tag, sub_tags, owned_ids):
 
     # Record when this tag was last successfully fetched from R34
     db.execute(
-        "UPDATE subscriptions SET last_fetched_at = ? WHERE tag_name = ?",
+        "UPDATE subscriptions SET last_fetched_at = %s WHERE tag_name = %s",
         (time.time(), tag)
     )
     db.commit()
@@ -1030,9 +981,7 @@ def api_fetch_subscriptions():
         db.close()
         return jsonify({"status": "ok", "new_posts": 0, "new_unseen": 0})
 
-    owned_ids = set(row[0] for row in db.execute(
-        "SELECT rule34_api_id FROM posts WHERE rule34_api_id IS NOT NULL"
-    ).fetchall())
+    owned_ids = _get_owned_rule34_ids(db)
 
     sub_tags  = [s['tag_name'] for s in subs]
     total_fetched = 0
@@ -1100,6 +1049,8 @@ def api_fetch_subscriptions_stream():
     CONCURRENCY      = BATCH_SIZE   # one thread per slot in the batch
 
     def generate():
+        yield f"event: progress\ndata: {json.dumps({'index': 0, 'total': 0, 'tag': '', 'fetched': 0, 'added_new': 0, 'skipped': False, 'error': None, 'starting': True})}\n\n"
+
         db_main = get_db()
         subs = get_subscriptions(db_main)
 
@@ -1108,9 +1059,7 @@ def api_fetch_subscriptions_stream():
             yield "event: done\ndata: {\"new_posts\":0,\"new_unseen\":0,\"errors\":[]}\n\n"
             return
 
-        owned_ids = set(row[0] for row in db_main.execute(
-            "SELECT rule34_api_id FROM posts WHERE rule34_api_id IS NOT NULL"
-        ).fetchall())
+        owned_ids = _get_owned_rule34_ids(db_main)
 
         # Read last_fetched_at for each tag
         now = time.time()
@@ -1158,10 +1107,12 @@ def api_fetch_subscriptions_stream():
         def fetch_one(tag):
             db = get_db()
             try:
-                fetched, added_new, err = _fetch_tag_posts(db, tag, sub_tags, owned_ids)
+                return _fetch_tag_posts(db, tag, sub_tags, owned_ids)
+            except Exception as exc:
+                logger.exception("fetch_one failed for %s", tag)
+                return 0, 0, str(exc)
             finally:
                 db.close()
-            return tag, fetched, added_new, err
 
         # Process in batches of BATCH_SIZE with a pause between batches
         batches = [to_fetch[i:i + BATCH_SIZE] for i in range(0, len(to_fetch), BATCH_SIZE)]
@@ -1171,7 +1122,12 @@ def api_fetch_subscriptions_stream():
             with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
                 futures = {pool.submit(fetch_one, tag): tag for tag in batch}
                 for future in as_completed(futures):
-                    tag, fetched, added_new, err = future.result()
+                    tag = futures[future]
+                    try:
+                        fetched, added_new, err = future.result()
+                    except Exception as exc:
+                        logger.exception("batch worker failed for %s", tag)
+                        fetched, added_new, err = 0, 0, str(exc)
 
                     with lock:
                         global_idx[0] += 1
@@ -1229,9 +1185,7 @@ def api_fetch_subscription_one():
     subs     = get_subscriptions(db)
     sub_tags = [s['tag_name'] for s in subs]
 
-    owned_ids = set(row[0] for row in db.execute(
-        "SELECT rule34_api_id FROM posts WHERE rule34_api_id IS NOT NULL"
-    ).fetchall())
+    owned_ids = _get_owned_rule34_ids(db)
 
     fetched, added_new, err = _fetch_tag_posts(db, tag, sub_tags, owned_ids)
     db.close()
@@ -1274,7 +1228,7 @@ def api_feed_action(rule34_post_id):
     # If saving, also add to posts table with tags
     if action == 'saved':
         feed_post = db.execute(
-            "SELECT * FROM feed_posts WHERE rule34_post_id = ?", (rule34_post_id,)
+            "SELECT * FROM feed_posts WHERE rule34_post_id = %s", (rule34_post_id,)
         ).fetchone()
         if feed_post:
             fp = dict(feed_post)
@@ -1285,17 +1239,18 @@ def api_feed_action(rule34_post_id):
 
             # Check if already in library (by rule34_api_id or rule34hub_id)
             existing_post = db.execute(
-                "SELECT id FROM posts WHERE rule34_api_id = ? OR rule34hub_id = ?",
+                "SELECT id FROM posts WHERE rule34_api_id = %s OR rule34hub_id = %s",
                 (rule34_post_id, rule34_post_id)
             ).fetchone()
 
             if existing_post:
                 post_db_id = existing_post['id']
             else:
-                cur = db.execute("""
+                row = db.execute("""
                     INSERT INTO posts
                         (rule34hub_id, rule34_api_id, file_url, thumb_cdn, cdn_url, media_type, status, resolved_by)
-                    VALUES (?,?,?,?,?,?,'resolved','feed_save')
+                    VALUES (%s, %s, %s, %s, %s, %s, 'resolved', 'feed_save')
+                    RETURNING id
                 """, (
                     rule34_post_id,
                     rule34_post_id,
@@ -1303,18 +1258,23 @@ def api_feed_action(rule34_post_id):
                     fp['preview_url'],
                     fp['file_url'],
                     media_type,
-                ))
-                post_db_id = cur.lastrowid
+                )).fetchone()
+                post_db_id = row['id']
 
             if post_db_id:
                 for tag_name in tags:
                     if not tag_name.strip():
                         continue
-                    db.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag_name,))
-                    tag_row = db.execute("SELECT id FROM tags WHERE name = ?", (tag_name,)).fetchone()
+                    db.execute(
+                        "INSERT INTO tags (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                        (tag_name,),
+                    )
+                    tag_row = db.execute("SELECT id FROM tags WHERE name = %s", (tag_name,)).fetchone()
                     if tag_row:
-                        db.execute("INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?,?)",
-                                   (post_db_id, tag_row['id']))
+                        db.execute(
+                            "INSERT INTO post_tags (post_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                            (post_db_id, tag_row['id']),
+                        )
             db.commit()
 
     db.close()
@@ -1331,7 +1291,10 @@ def api_bulk_subscriptions():
     for tag in tags:
         tag = tag.strip().lower().replace(' ', '_')
         if not tag: continue
-        db.execute("INSERT OR IGNORE INTO subscriptions (tag_name) VALUES (?)", (tag,))
+        db.execute(
+            "INSERT INTO subscriptions (tag_name) VALUES (%s) ON CONFLICT (tag_name) DO NOTHING",
+            (tag,),
+        )
         added += 1
     db.commit()
     db.close()
@@ -1378,15 +1341,17 @@ def api_mark_seen():
                 matched = [s for s in sub_tags if s in post_tag_set]
                 # Insert as ignored — already seen
                 existing = db.execute(
-                    "SELECT id, status FROM feed_posts WHERE rule34_post_id = ?", (pid,)
+                    "SELECT id, status FROM feed_posts WHERE rule34_post_id = %s", (pid,)
                 ).fetchone()
-                is_owned = db.execute('SELECT id FROM posts WHERE rule34_api_id = ?', (pid,)).fetchone()
+                is_owned = db.execute(
+                    'SELECT id FROM posts WHERE rule34_api_id = %s', (pid,)
+                ).fetchone()
                 new_status = 'owned' if is_owned else 'ignored'
                 if not existing:
                     db.execute("""
                         INSERT INTO feed_posts
                             (rule34_post_id, file_url, preview_url, media_type, tags, matched_subs, post_date, status)
-                        VALUES (?,?,?,?,?,?,?,?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         pid,
                         file_url,
@@ -1399,9 +1364,8 @@ def api_mark_seen():
                     ))
                     marked += 1
                 elif existing['status'] == 'unseen':
-                    # Update existing unseen posts to ignored
                     db.execute(
-                        "UPDATE feed_posts SET status = ? WHERE rule34_post_id = ?",
+                        "UPDATE feed_posts SET status = %s WHERE rule34_post_id = %s",
                         (new_status, pid)
                     )
                     marked += 1
@@ -1470,7 +1434,7 @@ def api_r34_search():
     if results:
         r34_ids = [int(p['id']) for p in results if p.get('id')]
         if r34_ids:
-            placeholders = ','.join('?' * len(r34_ids))
+            placeholders = ','.join(['%s'] * len(r34_ids))
             rows = db.execute(
                 f"SELECT rule34_api_id FROM posts WHERE rule34_api_id IN ({placeholders})",
                 r34_ids
@@ -1531,33 +1495,40 @@ def api_r34_save():
     try:
         # Avoid duplicates
         existing = db.execute(
-            "SELECT id FROM posts WHERE rule34_api_id = ?", (r34_id,)
+            "SELECT id FROM posts WHERE rule34_api_id = %s", (r34_id,)
         ).fetchone()
 
         if existing:
             db.close()
             return jsonify({"status": "already_saved", "id": existing['id']})
 
-        cur = db.execute("""
+        row = db.execute("""
             INSERT INTO posts
                 (rule34hub_id, rule34_api_id, file_url, thumb_cdn, cdn_url,
-                 media_type, status, resolved_by)
-            VALUES (?, ?, ?, ?, ?, ?, 'resolved', 'r34_search')
-        """, (r34_id, r34_id, file_url, preview, file_url, mt))
-        post_db_id = cur.lastrowid
+                 media_type, source_type, hub_url, status, resolved_by, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 'rule34', %s, 'resolved', 'r34_search', NOW())
+            RETURNING id
+        """, (
+            r34_id, r34_id, file_url, preview, file_url, mt,
+            f'https://rule34.xxx/index.php?page=post&s=view&id={r34_id}',
+        )).fetchone()
+        post_db_id = row['id']
 
         for tag_name in tags:
             tag_name = tag_name.strip()
             if not tag_name:
                 continue
-            db.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag_name,))
+            db.execute(
+                "INSERT INTO tags (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                (tag_name,),
+            )
             tag_row = db.execute(
-                "SELECT id FROM tags WHERE name = ?", (tag_name,)
+                "SELECT id FROM tags WHERE name = %s", (tag_name,)
             ).fetchone()
             if tag_row:
                 db.execute(
-                    "INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?, ?)",
-                    (post_db_id, tag_row['id'])
+                    "INSERT INTO post_tags (post_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                    (post_db_id, tag_row['id']),
                 )
 
         db.commit()
@@ -1569,5 +1540,61 @@ def api_r34_save():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/posts/import', methods=['POST'])
+def api_import_post():
+    """
+    Add a single item to the library from:
+      - direct image/video URL (.jpg, .png, .mp4, …)
+      - rule34.xxx post page URL
+      - rule34hub.com post page URL (HTML is fetched and parsed)
+    Optional JSON: { url, tags: ["tag_a", …] }
+    """
+    payload = request.get_json() or {}
+    url = (payload.get('url') or '').strip()
+    extra_tags = payload.get('tags') or []
+
+    force = bool(payload.get('force', False))
+
+    if not url:
+        return jsonify({"error": "url required"}), 400
+
+    try:
+        fields = resolve_import_url(url, fetch_r34_post=_fetch_r34_by_id, force=force)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except requests.RequestException as e:
+        return jsonify({"error": f"Failed to fetch URL: {e}"}), 502
+    except Exception as e:
+        logger.exception("resolve_import_url failed")
+        return jsonify({"error": f"Import error: {e}"}), 500
+
+    if extra_tags:
+        merged = list(fields.get('tags') or [])
+        for t in extra_tags:
+            norm = str(t).strip().lower().replace(' ', '_')
+            if norm and norm not in merged:
+                merged.append(norm)
+        fields['tags'] = merged
+
+    db = get_db()
+    try:
+        post_id, already = import_post(db, fields)
+        post = get_post_with_tags(db, post_id)
+        db.close()
+        return jsonify({
+            "status": "already_saved" if already else "ok",
+            "id": post_id,
+            "post": post,
+        })
+    except Exception as e:
+        logger.exception("import_post db write failed")
+        db.rollback()
+        db.close()
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__':
+    # Run once before the debug reloader spawns (child reuses the same DB).
+    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        init_db(quiet=True)
     app.run(host='0.0.0.0', debug=True, port=5002)

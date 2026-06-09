@@ -142,6 +142,10 @@ export default function R34Search() {
   const [selected, setSelected]   = useState(new Set())
   const [saving, setSaving]       = useState(new Set())  // r34 IDs currently being saved
   const [saveMsg, setSaveMsg]     = useState({})         // { [r34Id]: 'ok' | 'err' }
+  const [importUrl, setImportUrl] = useState('')
+  const [importStatus, setImportStatus] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const [forceImport, setForceImport] = useState(false)
   const gridRef = useRef()
   const sentinelRef = useRef()
 
@@ -245,6 +249,28 @@ export default function R34Search() {
     setSelected(new Set())
   }
 
+  async function importMedia() {
+    const url = importUrl.trim()
+    if (!url) return
+    setImporting(true)
+    setImportStatus(null)
+    try {
+      const res = await fetch('/api/posts/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, force: forceImport }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Import failed')
+      setImportStatus(data.status === 'already_saved' ? 'Already in library' : 'Added to library')
+      setImportUrl('')
+      setForceImport(false)
+    } catch (e) {
+      setImportStatus(e.message || 'Import failed')
+    }
+    setImporting(false)
+  }
+
   const selectedNotOwned = posts.filter(p => selected.has(p.id) && !p.in_library).length
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -304,6 +330,52 @@ export default function R34Search() {
           style={{ width: '100%', padding: '11px', fontSize: '0.82rem', letterSpacing: '0.08em' }}>
           SEARCH
         </button>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8,
+          borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--muted)', letterSpacing: '0.08em' }}>
+            ADD OTHER MEDIA
+          </div>
+          <div style={{ fontSize: '0.62rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+            Direct file URL, rule34hub.com post, or multporn.net comic/video (saved to your library).
+          </div>
+          <input
+            value={importUrl}
+            onChange={e => { setImportUrl(e.target.value); setImportStatus(null) }}
+            onKeyDown={e => e.key === 'Enter' && importMedia()}
+            placeholder="https://…"
+            style={{ fontSize: '0.72rem' }}
+          />
+          {/* Force import toggle */}
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            fontSize: '0.65rem', color: forceImport ? 'var(--accent)' : 'var(--muted)',
+            cursor: 'pointer', userSelect: 'none',
+          }}>
+            <input
+              type="checkbox"
+              checked={forceImport}
+              onChange={e => setForceImport(e.target.checked)}
+              style={{ accentColor: 'var(--accent)', width: 13, height: 13, cursor: 'pointer' }}
+            />
+            FORCE IMPORT
+            <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>
+              — for token-gated CDN links (e.g. FPO)
+            </span>
+          </label>
+          <button className="btn-surface" onClick={importMedia} disabled={importing || !importUrl.trim()}
+            style={{ width: '100%', opacity: importing ? 0.6 : 1 }}>
+            {importing ? 'IMPORTING…' : '+ IMPORT URL'}
+          </button>
+          {importStatus && (
+            <div style={{
+              fontSize: '0.65rem',
+              color: importStatus.startsWith('Already') ? 'var(--muted)' : 'var(--green)',
+            }}>
+              {importStatus}
+            </div>
+          )}
+        </div>
 
         {error && (
           <div style={{ fontSize: '0.65rem', color: 'var(--red)', wordBreak: 'break-word' }}>

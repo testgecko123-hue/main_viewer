@@ -1,9 +1,12 @@
 import React from 'react'
 import { useEffect, useRef } from 'react'
 import { gridCols, GRID } from '../config/gridConfig.js'
+import { EXTERNAL_IMG_PROPS, parseSourceMeta, postThumbUrl } from '../utils/mediaUtils.js'
 
 function PostThumb({ post, onSelect, isSelected, onAdd }) {
   const isVideo = post.media_type === 'video'
+  const isComic = post.media_type === 'comic'
+  const pageCount = parseSourceMeta(post).pages?.length
   const videoRef = React.useRef()
   const [hovered, setHovered] = React.useState(false)
 
@@ -45,9 +48,9 @@ function PostThumb({ post, onSelect, isSelected, onAdd }) {
       }}
     >
       <img
-        src={post.thumb_cdn}
-
+        src={postThumbUrl(post)}
         alt=""
+        {...EXTERNAL_IMG_PROPS}
         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block',
           opacity: (isVideo && hovered) ? 0 : 1, transition: 'opacity 0.1s' }}
         onError={e => e.target.style.display = 'none'}
@@ -67,6 +70,13 @@ function PostThumb({ post, onSelect, isSelected, onAdd }) {
           background: 'rgba(0,0,0,0.7)', borderRadius: 3,
           padding: '2px 5px', fontSize: '0.6rem', color: '#fff',
         }}>▶</div>
+      )}
+      {isComic && pageCount > 0 && (
+        <div style={{
+          position: 'absolute', bottom: 4, right: 4,
+          background: 'rgba(139,92,246,0.85)', borderRadius: 3,
+          padding: '2px 5px', fontSize: '0.6rem', color: '#fff',
+        }}>📖 {pageCount}p</div>
       )}
       {isSelected && (
         <div style={{

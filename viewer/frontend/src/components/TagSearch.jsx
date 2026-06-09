@@ -36,11 +36,23 @@ export default function TagSearch({ value, onChange, onSearch, singleMode = null
   const [suggestions, setSugs] = useState([])
   const [sugIdx, setSugIdx]   = useState(-1)
   const inputRef = useRef()
+  const containerRef = useRef()
   const debounce = useRef()
 
   useEffect(() => {
     if (singleMode) setMode(singleMode)
   }, [singleMode])
+
+  useEffect(() => {
+    function onPointerDown(e) {
+      if (!containerRef.current?.contains(e.target)) {
+        setSugs([])
+        setSugIdx(-1)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [])
 
   useEffect(() => {
     if (!input.trim()) { setSugs([]); return }
@@ -115,7 +127,7 @@ export default function TagSearch({ value, onChange, onSearch, singleMode = null
   const modeColors = PILL_COLORS[effectiveMode]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {!singleMode && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', gap: 6 }}>

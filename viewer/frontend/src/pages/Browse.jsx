@@ -3,6 +3,7 @@ import TagSearch from '../components/TagSearch.jsx'
 import PostGrid from '../components/PostGrid.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
 import { gridCols, GRID } from '../config/gridConfig.js'
+import { EXTERNAL_IMG_PROPS, postThumbUrl } from '../utils/mediaUtils.js'
 
 const LIMIT = 60
 const EMPTY_SEARCH = { needed: [], optional: [], exclude: [] }
@@ -74,7 +75,19 @@ function SampleGrid({ posts, removed, onRemove, onAdd, isMobile }) {
       gap: GRID.gap, alignItems: 'start',
     }}>
       {visible.map(post => (
-        <div key={post.id} style={{ position: 'relative' }}>
+        <div
+          key={post.id}
+          style={{ position: 'relative' }}
+          onMouseEnter={e => {
+            if (isMobile) return
+            const el = e.currentTarget.querySelector('[data-sample-overlay]')
+            if (el) { el.style.opacity = 1; el.style.pointerEvents = 'auto' }
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget.querySelector('[data-sample-overlay]')
+            if (el) { el.style.opacity = 0; el.style.pointerEvents = 'none' }
+          }}
+        >
           <div
             onClick={() => { if (isMobile) onAdd(post) }}
             onMouseDown={e => { if (e.button === 1) { e.preventDefault(); onAdd(post) }}}
@@ -83,18 +96,20 @@ function SampleGrid({ posts, removed, onRemove, onAdd, isMobile }) {
               aspectRatio: '1', cursor: 'pointer',
             }}
           >
-            <img src={post.thumb_cdn} alt=""
+            <img src={postThumbUrl(post)} alt=""
+              {...EXTERNAL_IMG_PROPS}
               style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
               onError={e => { e.target.style.display = 'none' }} />
           </div>
           {!isMobile && (
-            <div style={{
-              position: 'absolute', inset: 0, opacity: 0, transition: 'opacity 0.15s',
-              display: 'flex', alignItems: 'flex-end', padding: 4, gap: 4,
-              background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
-            }}
-              onMouseEnter={e => { e.currentTarget.style.opacity = 1 }}
-              onMouseLeave={e => { e.currentTarget.style.opacity = 0 }}
+            <div
+              data-sample-overlay
+              style={{
+                position: 'absolute', inset: 0, opacity: 0, transition: 'opacity 0.15s',
+                display: 'flex', alignItems: 'flex-end', padding: 4, gap: 4,
+                background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
+                pointerEvents: 'none',
+              }}
             >
               <button onClick={() => onAdd(post)}
                 style={{ flex: 1, background: 'var(--accent)', color: '#000',

@@ -22,7 +22,7 @@ function Nav({ onOpenViewer }) {
     { to: '/collections',  label: 'COLLECTIONS'   },
     { to: '/selection',    label: 'SELECTION'     },
     { to: '/tag-groups',   label: 'TAG GROUPS'    },
-    { to: '/R34Search',    label: 'R34 SEARCH'    },
+    { to: '/r34search',    label: 'R34 SEARCH'    },
   ]
 
   return (
@@ -110,7 +110,8 @@ function App() {
           <Route path="/collections"   element={<Collections  selection={selection} setSelection={setSelection} openViewer={(idx) => openViewer(idx ?? 0)} />} />
           <Route path="/selection"     element={<Selection    selection={selection} setSelection={setSelection} openViewer={(idx, subIds) => openViewer(idx || 0, subIds)} saveStatus={saveStatus} />} />
           <Route path="/tag-groups"    element={<TagGroups />} />
-          <Route path="/r34Search" element={<R34Search />} />
+          <Route path="/r34search" element={<R34Search />} />
+          <Route path="/R34Search" element={<Navigate to="/r34search" replace />} />
         </Routes>
       </div>
       {viewerOpen && (

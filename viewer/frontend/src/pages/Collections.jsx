@@ -274,6 +274,7 @@ export default function Collections({ selection, setSelection, openViewer }) {
   useEffect(() => {
     if (!reviewOpen) return
     function onKey(e) {
+      if (document.querySelector('[data-viewer-overlay]')) return
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       switch (e.key) {
         case 'ArrowRight': case 'd': e.preventDefault(); onReviewAdd(); break

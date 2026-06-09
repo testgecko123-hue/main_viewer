@@ -76,6 +76,16 @@ function ExcludeInput({ excluded, onChange }) {
   const [input, setInput] = useState('')
   const [sugs, setSugs]   = useState([])
   const debounce = useRef()
+  const containerRef = useRef()
+
+  useEffect(() => {
+    function onPointerDown(e) {
+      if (!containerRef.current?.contains(e.target)) setSugs([])
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [])
+
   useEffect(() => {
     if (!input.trim()) { setSugs([]); return }
     clearTimeout(debounce.current)
@@ -90,7 +100,7 @@ function ExcludeInput({ excluded, onChange }) {
     onChange([...excluded, norm]); setInput(''); setSugs([])
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ position: 'relative' }}>
         <input value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && add(input)}
@@ -515,6 +525,10 @@ export default function Subscriptions({ selection, setSelection }) {
           clearInterval(countdownTimer)
           try {
             const data = JSON.parse(e.data)
+            if (data.starting) {
+              setFetchStatus('Connecting to fetch stream…')
+              return
+            }
             setProgressLog(prev => {
               const idx = prev.findIndex(p => p.tag === data.tag)
               if (idx >= 0) { const next = [...prev]; next[idx] = data; return next }
@@ -556,12 +570,13 @@ export default function Subscriptions({ selection, setSelection }) {
           done(true)
         })
 
-        es.addEventListener('error', () => {
+        es.addEventListener('error', (ev) => {
+          if (!confirmed) console.warn('SSE fetch-stream error, falling back:', ev)
           done(confirmed)
         })
 
-        // Timeout: if nothing arrives in 1.5 s, assume SSE not supported
-        setTimeout(() => { if (!confirmed) done(false) }, 1500)
+        // Timeout: allow Supabase + large sub list to send first event (skipped tags, etc.)
+        setTimeout(() => { if (!confirmed) done(false) }, 8000)
 
       } catch {
         done(false)
@@ -666,6 +681,7 @@ export default function Subscriptions({ selection, setSelection }) {
   useEffect(() => {
     function onKey(e) {
       if (tab !== 'feed') return
+      if (document.querySelector('[data-viewer-overlay]')) return
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       const post = filteredFeedRef.current[0]
       if (!post) return
