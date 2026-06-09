@@ -1433,6 +1433,111 @@ def api_mark_seen():
     db.close()
     return jsonify({"status": "ok", "marked": marked})
 
+# ── Embed proxy ───────────────────────────────────────────────────────────────
+# Fetches Pornhub embed pages + assets server-side, stripping frame-blocking
+# headers and rewriting asset URLs so the player loads fully in an iframe.
+
+_PORNHUB_EMBED_RE  = re.compile(r'^https://www\.pornhub\.com/embed/[a-zA-Z0-9]+$')
+_ALLOWED_PROXY_RE  = re.compile(
+    r'^https?://(?:'
+    r'[a-z0-9-]+\.phncdn\.com'
+    r'|[a-z0-9-]+\.pornhub\.com'
+    r'|www\.pornhub\.com'
+    r')/'
+)
+
+_STRIP_HEADERS = {
+    'x-frame-options',
+    'content-security-policy',
+    'content-security-policy-report-only',
+    'transfer-encoding',   # we buffer the whole response
+}
+
+def _proxy_url(url: str) -> str:
+    """Rewrite an absolute URL to go through our proxy."""
+    return '/api/proxy/asset?url=' + urllib.parse.quote(url, safe='')
+
+def _rewrite_html(html: str) -> str:
+    """
+    Rewrite src/href/action attributes pointing at phncdn/pornhub
+    so they load through our proxy instead.
+    """
+    def replacer(m):
+        attr  = m.group(1)   # src= or href=
+        quote = m.group(2)   # " or '
+        url   = m.group(3)
+        if _ALLOWED_PROXY_RE.match(url):
+            return f'{attr}={quote}{_proxy_url(url)}{quote}'
+        return m.group(0)
+
+    # Match src="..." href="..." (not data: or relative)
+    html = re.sub(
+        r'(src|href)=(["\'])(https?://[^"\']+)\2',
+        replacer, html
+    )
+    # Also rewrite bare JS strings like "https://cdn...phncdn.com/..."
+    def js_replacer(m):
+        url = m.group(1)
+        if _ALLOWED_PROXY_RE.match(url):
+            return '"' + _proxy_url(url) + '"'
+        return m.group(0)
+    html = re.sub(r'"(https?://[a-z0-9-]+\.phncdn\.com/[^"]+)"', js_replacer, html)
+
+    return html
+
+
+@app.route('/api/proxy/embed')
+def api_proxy_embed():
+    url = (request.args.get('url') or '').strip()
+    if not _PORNHUB_EMBED_RE.match(url):
+        return jsonify({"error": "invalid embed URL"}), 400
+
+    try:
+        upstream = requests.get(url, headers=HEADERS, timeout=20)
+        upstream.raise_for_status()
+    except Exception as e:
+        return jsonify({"error": f"upstream fetch failed: {e}"}), 502
+
+    html = _rewrite_html(upstream.text)
+    resp = Response(html, status=200, content_type='text/html; charset=utf-8')
+    resp.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    return resp
+
+
+@app.route('/api/proxy/asset')
+def api_proxy_asset():
+    """Forward any phncdn/pornhub asset (JS, CSS, video segments, images)."""
+    url = (request.args.get('url') or '').strip()
+    if not _ALLOWED_PROXY_RE.match(url):
+        return jsonify({"error": "disallowed asset URL"}), 400
+
+    try:
+        upstream = requests.get(url, headers=HEADERS, timeout=30, stream=True)
+        upstream.raise_for_status()
+    except Exception as e:
+        return jsonify({"error": f"asset fetch failed: {e}"}), 502
+
+    content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
+    forwarded = {
+        k: v for k, v in upstream.headers.items()
+        if k.lower() not in _STRIP_HEADERS
+    }
+
+    resp = Response(
+        upstream.iter_content(chunk_size=65536),
+        status=upstream.status_code,
+        content_type=content_type,
+        direct_passthrough=True,
+    )
+    for k, v in forwarded.items():
+        try:
+            resp.headers[k] = v
+        except Exception:
+            pass
+    resp.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    return resp
+
+
 # ── R34 Direct Search ─────────────────────────────────────────────────────────
 
 @app.route('/api/r34/search')
