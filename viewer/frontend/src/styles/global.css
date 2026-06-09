@@ -40,8 +40,7 @@ body {
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Push content below status bar */
-  padding-top: var(--safe-top);
+  /* Safe area is handled by the fixed nav wrapper in App.jsx */
 }
 
 /* Prevent zoom on input focus on mobile */

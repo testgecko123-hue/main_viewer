@@ -862,75 +862,143 @@ export default function Subscriptions({ selection, setSelection }) {
         {tab === 'feed' && (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
 
-            {/* Artist chips — horizontal scroll strip */}
-            <div style={{
-              background: 'var(--surface)', borderBottom: '1px solid var(--border)',
-              padding: '10px 12px', flexShrink: 0,
+      {/* Artist chips — CSS Grid on desktop for exact row control */}
+      <div style={{
+        background: 'var(--surface)', borderBottom: '1px solid var(--border)',
+        padding: '10px 12px', flexShrink: 0,
+      }}>
+        {/* Desktop grid layout */}
+        {!isMobile ? (
+          <>
+            <div style={{ 
+              fontSize: '0.68rem', color: 'var(--muted)', marginBottom: 8 
             }}>
-              <div style={{
-                display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4,
-                WebkitOverflowScrolling: 'touch',
-              }}>
-                <span style={{ fontSize: '0.68rem', color: 'var(--muted)', alignSelf: 'center',
-                  flexShrink: 0, marginRight: 2 }}>ARTISTS:</span>
-                {subs.map(s => {
-                  const v = subValue(s)
-                  const isSel = feedSelected.includes(v)
-                  return (
-                    <span key={v}
-                      onClick={() => {
-                        const next = isSel ? feedSelected.filter(t => t !== v) : [...feedSelected, v]
-                        setFeedSelected(next); saveStored(selectedStorageKey, next)
-                      }}
-                      style={{
-                        flexShrink: 0, borderRadius: 20, padding: '6px 12px',
-                        fontSize: '0.75rem', cursor: 'pointer',
-                        background: isSel ? '#1e3a5f55' : 'var(--surface3)',
-                        border: `1px solid ${isSel ? 'var(--blue)' : 'var(--border2)'}`,
-                        color: isSel ? '#93c5fd' : 'var(--muted2)',
-                      }}>
-                      {subLabel(s)}
-                    </span>
-                  )
-                })}
-                {feedSelected.length > 0 && (
-                  <span onClick={() => { setFeedSelected([]); saveStored(selectedStorageKey, []) }}
-                    style={{
-                      flexShrink: 0, borderRadius: 20, padding: '6px 10px',
-                      fontSize: '0.72rem', cursor: 'pointer', color: 'var(--muted)',
-                      border: '1px solid var(--border)', background: 'transparent',
-                    }}>
-                    clear ×
-                  </span>
-                )}
-              </div>
-
-              {/* Exclude tags — collapsible */}
-              <div style={{ marginTop: 8 }}>
-                <button
-                  onClick={() => setShowExclPanel(v => !v)}
-                  style={{
-                    background: 'transparent', border: 'none', padding: 0,
-                    fontSize: '0.7rem', color: feedExcl.length ? 'var(--red)' : 'var(--muted)',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                  }}>
-                  {showExclPanel ? '▲' : '▼'} EXCLUDE
-                  {feedExcl.length > 0 && (
-                    <span style={{ background: '#7f1d1d33', border: '1px solid #dc262655',
-                      borderRadius: 10, padding: '1px 6px', fontSize: '0.65rem', color: '#fca5a5' }}>
-                      {feedExcl.length}
-                    </span>
-                  )}
-                </button>
-                {showExclPanel && (
-                  <div style={{ marginTop: 8 }}>
-                    <ExcludeInput excluded={feedExcl} onChange={next => {
-                      setFeedExcl(next); saveStored('sub_feed_excl', next)
-                    }} />
-                  </div>
-                )}
-              </div>
+              ARTISTS:
             </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(100px, auto))',
+              gap: 6,
+              marginBottom: 12,
+              maxHeight: '120px', // Limit to ~2-3 rows
+              overflowY: 'auto',   // Scroll if more artists
+              paddingRight: 4,
+            }}>
+              {subs.map(s => {
+                const v = subValue(s)
+                const isSel = feedSelected.includes(v)
+                return (
+                  <span key={v}
+                    onClick={() => {
+                      const next = isSel ? feedSelected.filter(t => t !== v) : [...feedSelected, v]
+                      setFeedSelected(next); saveStored(selectedStorageKey, next)
+                    }}
+                    style={{
+                      borderRadius: 20, padding: '6px 12px',
+                      fontSize: '0.75rem', cursor: 'pointer',
+                      background: isSel ? '#1e3a5f55' : 'var(--surface3)',
+                      border: `1px solid ${isSel ? 'var(--blue)' : 'var(--border2)'}`,
+                      color: isSel ? '#93c5fd' : 'var(--muted2)',
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
+                    {subLabel(s)}
+                  </span>
+                )
+              })}
+              {feedSelected.length > 0 && (
+                <span onClick={() => { setFeedSelected([]); saveStored(selectedStorageKey, []) }}
+                  style={{
+                    borderRadius: 20, padding: '6px 10px',
+                    fontSize: '0.72rem', cursor: 'pointer', color: 'var(--muted)',
+                    border: '1px solid var(--border)', background: 'transparent',
+                    textAlign: 'center',
+                  }}>
+                  clear ×
+                </span>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Mobile horizontal scroll (unchanged) */
+          <div style={{
+            display: 'flex',
+            flexWrap: 'nowrap',
+            gap: 6,
+            overflowX: 'auto',
+            paddingBottom: 4,
+            WebkitOverflowScrolling: 'touch',
+          }}>
+            <span style={{ 
+              fontSize: '0.68rem', color: 'var(--muted)', alignSelf: 'center',
+              flexShrink: 0, marginRight: 2 
+            }}>
+              ARTISTS:
+            </span>
+            {subs.map(s => {
+              const v = subValue(s)
+              const isSel = feedSelected.includes(v)
+              return (
+                <span key={v}
+                  onClick={() => {
+                    const next = isSel ? feedSelected.filter(t => t !== v) : [...feedSelected, v]
+                    setFeedSelected(next); saveStored(selectedStorageKey, next)
+                  }}
+                  style={{
+                    flexShrink: 0,
+                    borderRadius: 20, padding: '6px 12px',
+                    fontSize: '0.75rem', cursor: 'pointer',
+                    background: isSel ? '#1e3a5f55' : 'var(--surface3)',
+                    border: `1px solid ${isSel ? 'var(--blue)' : 'var(--border2)'}`,
+                    color: isSel ? '#93c5fd' : 'var(--muted2)',
+                    whiteSpace: 'nowrap',
+                  }}>
+                  {subLabel(s)}
+                </span>
+              )
+            })}
+            {feedSelected.length > 0 && (
+              <span onClick={() => { setFeedSelected([]); saveStored(selectedStorageKey, []) }}
+                style={{
+                  flexShrink: 0, borderRadius: 20, padding: '6px 10px',
+                  fontSize: '0.72rem', cursor: 'pointer', color: 'var(--muted)',
+                  border: '1px solid var(--border)', background: 'transparent',
+                  whiteSpace: 'nowrap',
+                }}>
+                clear ×
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Exclude tags section remains the same */}
+        <div style={{ marginTop: 8 }}>
+          <button
+            onClick={() => setShowExclPanel(v => !v)}
+            style={{
+              background: 'transparent', border: 'none', padding: 0,
+              fontSize: '0.7rem', color: feedExcl.length ? 'var(--red)' : 'var(--muted)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+            {showExclPanel ? '▲' : '▼'} EXCLUDE
+            {feedExcl.length > 0 && (
+              <span style={{ background: '#7f1d1d33', border: '1px solid #dc262655',
+                borderRadius: 10, padding: '1px 6px', fontSize: '0.65rem', color: '#fca5a5' }}>
+                {feedExcl.length}
+              </span>
+            )}
+          </button>
+          {showExclPanel && (
+            <div style={{ marginTop: 8 }}>
+              <ExcludeInput excluded={feedExcl} onChange={next => {
+                setFeedExcl(next); saveStored('sub_feed_excl', next)
+              }} />
+            </div>
+          )}
+        </div>
+      </div>
 
             {/* Feed card area */}
             <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 12px' : '24px 20px' }}>

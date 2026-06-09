@@ -1,32 +1,15 @@
 /**
  * MobileNav.jsx
  *
- * Drop-in replacement for the top nav bar on mobile.
- * On desktop: renders the original horizontal tab bar (pass through children or tabs array).
- * On mobile: renders a slim header with the current page title + hamburger,
- * and a full-screen overlay to switch pages.
- *
- * Usage:
- *   <MobileNav
- *     tabs={[
- *       { id: 'library',       label: 'Library',       icon: '🗄' },
- *       { id: 'browse',        label: 'Browse',        icon: '🔀' },
- *       { id: 'subscriptions', label: 'Subscriptions', icon: '📡' },
- *       { id: 'collections',   label: 'Collections',   icon: '📁' },
- *       { id: 'selection',     label: 'Selection',     icon: '☑' },
- *       { id: 'tag-groups',    label: 'Tag Groups',    icon: '🏷' },
- *       { id: 'r34-search',    label: 'R34 Search',    icon: '🔍' },
- *     ]}
- *     active={currentPage}
- *     onChange={setCurrentPage}
- *     selectionCount={selection.ids.length}  // optional badge
- *   />
+ * On desktop: horizontal tab bar.
+ * On mobile: header with page title+icon (left) and hamburger (right).
+ * Dropdown includes all tabs + a Viewer option.
  */
 
 import { useState } from 'react'
 import useIsMobile from '../hooks/useIsMobile.js'
 
-export default function MobileNav({ tabs = [], active, onChange, selectionCount = 0 }) {
+export default function MobileNav({ tabs = [], active, onChange, onOpenViewer }) {
   const isMobile = useIsMobile()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -37,8 +20,13 @@ export default function MobileNav({ tabs = [], active, onChange, selectionCount 
     setMenuOpen(false)
   }
 
+  function openViewerAndClose() {
+    if (onOpenViewer) onOpenViewer()
+    setMenuOpen(false)
+  }
+
   if (!isMobile) {
-    // Desktop: render a normal horizontal nav bar
+    // Desktop: horizontal nav bar — logo | tabs | viewer
     return (
       <nav style={{
         height: 'var(--nav-h)',
@@ -47,86 +35,93 @@ export default function MobileNav({ tabs = [], active, onChange, selectionCount 
         display: 'flex', alignItems: 'center',
         padding: '0 16px', gap: 4, flexShrink: 0,
       }}>
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => onChange(tab.id)}
-            style={{
-              padding: '8px 14px', fontSize: '0.72rem', letterSpacing: '0.08em',
-              background: 'transparent', border: 'none',
-              borderBottom: `2px solid ${active === tab.id ? 'var(--accent)' : 'transparent'}`,
-              color: active === tab.id ? 'var(--accent)' : 'var(--muted)',
-              borderRadius: 0, cursor: 'pointer',
-            }}>
-            {tab.label}
-            {tab.id === 'selection' && selectionCount > 0 && (
-              <span style={{ marginLeft: 5, fontSize: '0.65rem', background: 'var(--accent)',
-                color: '#000', borderRadius: 10, padding: '1px 6px', fontWeight: 700 }}>
-                {selectionCount}
-              </span>
-            )}
-          </button>
-        ))}
+        {/* Logo */}
+        <div style={{
+          fontFamily: 'var(--font-display)', fontSize: '0.95rem',
+          color: 'var(--accent)', letterSpacing: '0.1em',
+          paddingRight: 16, marginRight: 8,
+          borderRight: '1px solid var(--border)',
+          whiteSpace: 'nowrap', userSelect: 'none',
+        }}>
+          VAULT
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => onChange(tab.id)}
+              style={{
+                padding: '8px 14px', fontSize: '0.72rem', letterSpacing: '0.08em',
+                background: 'transparent', border: 'none',
+                borderBottom: `2px solid ${active === tab.id ? 'var(--accent)' : 'transparent'}`,
+                color: active === tab.id ? 'var(--accent)' : 'var(--muted)',
+                borderRadius: 0, cursor: 'pointer',
+              }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Viewer button */}
+        <button
+          onClick={onOpenViewer}
+          style={{
+            marginLeft: 8,
+            padding: '8px 14px', fontSize: '0.72rem', letterSpacing: '0.08em',
+            background: 'transparent',
+            borderTop: 'none', borderRight: 'none', borderBottom: '2px solid transparent',
+            borderLeft: '1px solid var(--border)',
+            color: 'var(--accent)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6,
+            whiteSpace: 'nowrap',
+          }}>
+          ▶ VIEWER
+        </button>
       </nav>
     )
   }
 
-  // Mobile: compact header + full-screen menu
+  // Mobile: header with title+icon left, hamburger right
   return (
     <>
-      {/* Slim header bar */}
       <nav style={{
-        height: 'var(--nav-h)',
+        height: 48,
         background: 'var(--surface)',
         borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between',
         padding: '0 16px',
         flexShrink: 0,
       }}>
-        {/* Current page title */}
+        {/* Left side: icon + page title */}
         <div style={{
-          flex: 1,
+          display: 'flex', alignItems: 'center', gap: 8,
           fontFamily: 'var(--font-display)',
           fontSize: '0.95rem',
+          fontWeight: 500,
           color: 'var(--accent)',
-          letterSpacing: '-0.01em',
         }}>
-          {activeTab?.icon && <span style={{ marginRight: 8 }}>{activeTab.icon}</span>}
-          {activeTab?.label ?? 'VAULT'}
+          {activeTab?.icon && <span style={{ fontSize: '1.1rem' }}>{activeTab.icon}</span>}
+          <span>{activeTab?.label ?? 'VAULT'}</span>
         </div>
 
-        {/* Selection badge shortcut */}
-        {selectionCount > 0 && (
-          <button onClick={() => navigate('selection')}
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: '0.78rem', color: 'var(--muted)',
-              marginRight: 12, padding: '8px 4px',
-            }}>
-            ☑
-            <span style={{ background: 'var(--accent)', color: '#000', borderRadius: 10,
-              padding: '1px 7px', fontSize: '0.7rem', fontWeight: 700 }}>
-              {selectionCount}
-            </span>
-          </button>
-        )}
-
-        {/* Hamburger */}
+        {/* Right side: hamburger */}
         <button
           onClick={() => setMenuOpen(true)}
           style={{
             background: 'transparent', border: '1px solid var(--border)',
             borderRadius: 4, color: 'var(--text)', cursor: 'pointer',
-            padding: '8px 12px', fontSize: '1.1rem', lineHeight: 1,
-            minWidth: 44, minHeight: 44,
+            padding: '6px 10px', fontSize: '1.1rem', lineHeight: 1,
+            minWidth: 40, minHeight: 40,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
           ☰
         </button>
       </nav>
 
-      {/* Full-screen page selector overlay */}
+      {/* Full-screen dropdown menu */}
       {menuOpen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
@@ -135,7 +130,6 @@ export default function MobileNav({ tabs = [], active, onChange, selectionCount 
           paddingTop: 'var(--safe-top, 0px)',
           paddingBottom: 'var(--safe-bottom, 0px)',
         }}>
-          {/* Header */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '16px 20px', borderBottom: '1px solid var(--border)',
@@ -147,14 +141,14 @@ export default function MobileNav({ tabs = [], active, onChange, selectionCount 
               style={{
                 background: 'transparent', border: 'none', color: 'var(--muted)',
                 fontSize: '1.6rem', cursor: 'pointer', padding: '0 4px',
-                minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                minWidth: 44, minHeight: 44,
               }}>
               ×
             </button>
           </div>
 
-          {/* Nav items */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
+            {/* Normal tabs */}
             {tabs.map(tab => {
               const isActive = tab.id === active
               return (
@@ -177,21 +171,32 @@ export default function MobileNav({ tabs = [], active, onChange, selectionCount 
                   }}>
                     {tab.label}
                   </span>
-                  {tab.id === 'selection' && selectionCount > 0 && (
-                    <span style={{ marginLeft: 'auto', background: 'var(--accent)', color: '#000',
-                      borderRadius: 12, padding: '2px 10px', fontSize: '0.8rem', fontWeight: 700 }}>
-                      {selectionCount}
-                    </span>
-                  )}
                   {isActive && (
                     <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontSize: '0.9rem' }}>●</span>
                   )}
                 </button>
               )
             })}
+
+            {/* Separator + Viewer option */}
+            <div style={{ height: 1, background: 'var(--border)', margin: '16px 24px' }} />
+            <button
+              onClick={openViewerAndClose}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 16,
+                padding: '18px 24px', background: 'transparent',
+                border: 'none', cursor: 'pointer', textAlign: 'left',
+              }}>
+              <span style={{ fontSize: '1.4rem', width: 32, textAlign: 'center' }}>▶</span>
+              <span style={{
+                fontFamily: 'var(--font-display)', fontSize: '1rem',
+                letterSpacing: '0.04em', color: 'var(--accent)',
+              }}>
+                VIEWER
+              </span>
+            </button>
           </div>
 
-          {/* Footer hint */}
           <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border)',
             fontSize: '0.68rem', color: 'var(--muted)' }}>
             Tap a page to navigate
