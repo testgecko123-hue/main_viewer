@@ -19,6 +19,10 @@ _R34_POST_RE = re.compile(
 )
 _SIZE_SUFFIX_RE = re.compile(r'\.pic(?:preview|small|256|480)\.', re.I)
 _MULTPORN_RE = re.compile(r'multporn\.net/', re.I)
+_PORNHUB_RE = re.compile(r'pornhub\.com/', re.I)
+_PORNHUB_VIEWKEY_RE = re.compile(
+    r'(?:viewkey=|pornhub\.com/embed/)([a-zA-Z0-9]+)', re.I,
+)
 
 # Maps a known extension to its media type, used for force-import sniffing
 _EXT_TO_MEDIA: dict[str, str] = {
@@ -285,6 +289,49 @@ def _multporn_scrape(url: str) -> dict:
     }
 
 
+def resolve_pornhub(url: str) -> dict:
+    """
+    Resolve a Pornhub video URL to embed metadata.
+
+    Accepts both watch URLs (view_video.php?viewkey=...) and embed URLs.
+    The viewkey is used to build the embed URL; the thumbnail is scraped
+    from the embed page's flashvars so no title needs to be stored.
+    """
+    m = _PORNHUB_VIEWKEY_RE.search(url)
+    if not m:
+        raise ValueError(f'Could not extract Pornhub viewkey from URL: {url}')
+
+    viewkey = m.group(1)
+    embed_url = f'https://www.pornhub.com/embed/{viewkey}'
+    hub_url = f'https://www.pornhub.com/view_video.php?viewkey={viewkey}'
+
+    # Scrape the embed page to pull the thumbnail from flashvars.image_url
+    thumb = ''
+    try:
+        resp = requests.get(embed_url, headers=HEADERS, timeout=20)
+        resp.raise_for_status()
+        img_m = re.search(r'"image_url"\s*:\s*"([^"]+)"', resp.text)
+        if img_m:
+            # Unescape the JSON-encoded URL (e.g. \/ → /)
+            thumb = img_m.group(1).replace('\\/', '/')
+    except Exception:
+        pass  # Thumbnail is best-effort; missing thumb is not fatal
+
+    return {
+        'source_type': 'pornhub',
+        'rule34hub_id': None,
+        'rule34_api_id': None,
+        'file_url': embed_url,
+        'cdn_url': embed_url,
+        'thumb_cdn': thumb or embed_url,
+        'hub_url': hub_url,
+        'media_type': 'embed',
+        'media_category': 'imported',
+        'tags': [],
+        'resolved_by': 'pornhub_import',
+    }
+
+
 def resolve_multporn(url: str) -> dict:
     """Resolve a multporn.net comic/video/album URL."""
     return _multporn_scrape(url)
@@ -315,6 +362,10 @@ def resolve_import_url(url: str, *, fetch_r34_post=None, force: bool = False) ->
             # Default to video when we truly can't tell — caller opted in
             ext = 'mp4'
         return resolve_direct_url(url, forced_ext=ext)
+
+    # ── Pornhub ──────────────────────────────────────────────────────────────
+    if _PORNHUB_RE.search(url):
+        return resolve_pornhub(url)
 
     # ── Multporn ─────────────────────────────────────────────────────────────
     if _MULTPORN_RE.search(url):
@@ -358,6 +409,6 @@ def resolve_import_url(url: str, *, fetch_r34_post=None, force: bool = False) ->
 
     raise ValueError(
         'Unsupported URL. Use a direct image/video link, rule34.xxx post URL, '
-        'rule34hub.com post URL, or multporn.net comic/video URL. '
+        'rule34hub.com post URL, multporn.net comic/video URL, or pornhub.com video URL. '
         'For token-gated CDN links (e.g. FPO), use force=True.'
     )

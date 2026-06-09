@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
     "forceConsistentCasingInFileNames": false,
-    "jsx": "react-jsx",
-    "baseUrl": "."
+    "jsx": "react-jsx"
   },
   "include": ["src", "src/db"]
 }

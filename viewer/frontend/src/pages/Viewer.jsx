@@ -52,6 +52,8 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
   const [isComicStrip, setIsComicStrip] = useState(false)
   const [comicOverride, setComicOverride] = useState(null) // true/false = manual override, null = auto
   const [comicPageIdx, setComicPageIdx] = useState(0)
+  // Mobile comic lock: user must tap "OPEN COMIC" to enter paging mode; false = preview mode
+  const [comicLocked, setComicLocked] = useState(false)
 
   // Preload-all state: null = idle, { loaded, total, done } = active/finished
   const [preloadState, setPreloadState] = useState(null)
@@ -100,7 +102,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     }
     return Array.isArray(pages) && pages.length > 1 ? pages : []
   })()
-  const comicCarouselActive = isComic || comicPages.length > 1
+  const comicCarouselActive = (isComic || comicPages.length > 1) && (!isMobile || comicLocked)
   const comicActive = !comicCarouselActive && (comicOverride !== null ? comicOverride : isComicStrip)
   const comicImageUrl = comicCarouselActive
     ? comicPages[comicPageIdx]
@@ -117,6 +119,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     setIsComicStrip(false)
     setComicOverride(null)
     setComicPageIdx(0)
+    setComicLocked(false)
     setVidCurrentTime(0)
     setVidDuration(0)
     setVidPaused(false)
@@ -620,40 +623,87 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
             }}
           />
         )}
+      {/* ── Embed (e.g. Pornhub iframe) ── */}
+      {postData?.media_type === 'embed' && (
+        <iframe
+          key={postData.id}
+          src={postData.file_url || postData.cdn_url}
+          frameBorder="0"
+          allowFullScreen
+          scrolling="no"
+          style={{
+            width: '100%',
+            height: '100%',
+            maxHeight: isMobile ? '100vh' : '100%',
+            border: 'none',
+            pointerEvents: 'auto',
+          }}
+        />
+      )}
       </div>
 
       {/* ── Top bar ── */}
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50,
-        padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8,
         background: 'linear-gradient(to bottom, rgba(0,0,0,0.75), transparent)',
       }}>
-        <span style={{ fontFamily: 'var(--font-display)', color: 'var(--accent)',
-          fontSize: '0.85rem', fontWeight: 800 }}>VIEWER</span>
-        <span style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>
-          {idx + 1} / {ids.length}
-        </span>
+        {/* VIEWER label — hide on mobile when comic is open (saves space) */}
+        {(!isMobile || !comicLocked) && (
+          <span style={{ fontFamily: 'var(--font-display)', color: 'var(--accent)',
+            fontSize: '0.85rem', fontWeight: 800 }}>VIEWER</span>
+        )}
 
-        {postData?.media_type === 'video' && (
+        {/* Post counter — hide on mobile when comic locked (navbar shows it already) */}
+        {(!isMobile || !comicLocked) && (
+          <span style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>
+            {idx + 1} / {ids.length}
+          </span>
+        )}
+
+        {postData?.media_type === 'video' && !isMobile && (
           <span style={{ background: 'var(--surface2)', border: '1px solid var(--border)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: 'var(--muted)' }}>
             VIDEO
           </span>
         )}
-        {isVr && (
+        {isVr && !isMobile && (
           <span style={{ background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.5)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: '#93c5fd' }}>
             VR
           </span>
         )}
 
-        {/* Comic strip badge */}
-        {comicCarouselActive && (
+        {/* Mobile comic locked: show exit button + page counter together, nothing else on left */}
+        {isMobile && comicLocked && (
+          <button
+            onClick={e => { e.stopPropagation(); setComicLocked(false); setComicPageIdx(0) }}
+            style={{
+              background: 'rgba(139,92,246,0.2)', border: '1px solid rgba(139,92,246,0.5)',
+              borderRadius: 3, padding: '4px 10px', fontSize: '0.7rem', color: '#c4b5fd',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+            ✕ EXIT COMIC
+            <span style={{ opacity: 0.7, fontSize: '0.62rem' }}>
+              {comicPageIdx + 1}/{comicPages.length}
+            </span>
+          </button>
+        )}
+        {postData?.media_type === 'embed' && !isMobile && (
+        <span style={{ background: 'var(--surface2)', border: '1px solid var(--border)',
+          borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: 'var(--muted)' }}>
+          EMBED
+        </span>
+        )}
+
+        {/* Desktop: comic page badge */}
+        {!isMobile && comicCarouselActive && (
           <span style={{ background: 'rgba(139,92,246,0.25)', border: '1px solid rgba(139,92,246,0.5)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: '#c4b5fd' }}>
             {isComic ? '📖' : '🖼'} {comicPageIdx + 1}/{comicPages.length}
           </span>
         )}
+
         {comicActive && (
           <span style={{ background: 'rgba(139,92,246,0.25)', border: '1px solid rgba(139,92,246,0.5)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: '#c4b5fd' }}>
@@ -661,14 +711,14 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
           </span>
         )}
 
-        {/* Preload status badge */}
-        {preloadState?.done && (
+        {/* Preload status badge — hide on mobile when comic locked */}
+        {(!isMobile || !comicLocked) && preloadState?.done && (
           <span style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.4)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: 'var(--green)' }}>
             ✓ ALL LOADED
           </span>
         )}
-        {preloadState && !preloadState.done && (
+        {(!isMobile || !comicLocked) && preloadState && !preloadState.done && (
           <span style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: '#93c5fd' }}>
             ⬇ {preloadState.loaded}/{preloadState.total}
@@ -740,6 +790,8 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)',
         fontSize: '2rem', padding: '20px 16px', cursor: 'pointer',
         transition: 'color 0.15s', zIndex: 50,
+        // Hide post-nav arrows on mobile when comic carousel is active — page arrows take over
+        display: (isMobile && comicCarouselActive) ? 'none' : undefined,
       }}
         onMouseEnter={e => e.target.style.color = 'rgba(255,255,255,0.9)'}
         onMouseLeave={e => e.target.style.color = 'rgba(255,255,255,0.3)'}
@@ -749,10 +801,124 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)',
         fontSize: '2rem', padding: '20px 16px', cursor: 'pointer',
         transition: 'color 0.15s', zIndex: 50,
+        display: (isMobile && comicCarouselActive) ? 'none' : undefined,
       }}
         onMouseEnter={e => e.target.style.color = 'rgba(255,255,255,0.9)'}
         onMouseLeave={e => e.target.style.color = 'rgba(255,255,255,0.3)'}
       >›</button>
+
+      {/* ── Mobile: Comic preview banner — tap to enter comic mode ── */}
+      {isMobile && !comicLocked && (isComic || comicPages.length > 1) && imgLoaded && (
+        <div
+          onClick={e => { e.stopPropagation(); setComicLocked(true); setComicPageIdx(0) }}
+          style={{
+            position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
+            left: '50%', transform: 'translateX(-50%)',
+            zIndex: 60,
+            background: 'rgba(139,92,246,0.85)',
+            border: '1px solid rgba(196,181,253,0.5)',
+            borderRadius: 24, padding: '10px 22px',
+            display: 'flex', alignItems: 'center', gap: 8,
+            backdropFilter: 'blur(8px)',
+            cursor: 'pointer',
+            boxShadow: '0 4px 24px rgba(139,92,246,0.4)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ fontSize: '1.1rem' }}>📖</span>
+          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fff', letterSpacing: '0.05em' }}>
+            OPEN COMIC
+          </span>
+          <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.7)' }}>
+            {comicPages.length} page{comicPages.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+      )}
+
+      {/* ── Comic page navigation — mobile tap buttons ── */}
+      {isMobile && comicCarouselActive && (
+        <>
+          {/* Prev page */}
+          <button
+            onClick={e => { e.stopPropagation(); goComicPage(-1) }}
+            disabled={comicPageIdx === 0}
+            style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0,
+              width: '25%', background: 'transparent', border: 'none',
+              zIndex: 50, cursor: comicPageIdx === 0 ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
+              paddingLeft: 8,
+            }}
+          >
+            {comicPageIdx > 0 && (
+              <span style={{
+                background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 6, padding: '10px 10px', fontSize: '1.4rem',
+                color: 'rgba(255,255,255,0.85)', lineHeight: 1,
+                backdropFilter: 'blur(4px)',
+              }}>‹</span>
+            )}
+          </button>
+
+          {/* Next page */}
+          <button
+            onClick={e => { e.stopPropagation(); goComicPage(1) }}
+            disabled={comicPageIdx === comicPages.length - 1}
+            style={{
+              position: 'absolute', right: 0, top: 0, bottom: 0,
+              width: '25%', background: 'transparent', border: 'none',
+              zIndex: 50, cursor: comicPageIdx === comicPages.length - 1 ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+              paddingRight: 8,
+            }}
+          >
+            {comicPageIdx < comicPages.length - 1 && (
+              <span style={{
+                background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 6, padding: '10px 10px', fontSize: '1.4rem',
+                color: 'rgba(255,255,255,0.85)', lineHeight: 1,
+                backdropFilter: 'blur(4px)',
+              }}>›</span>
+            )}
+          </button>
+
+          {/* Page indicator dots */}
+          {comicPages.length <= 20 && (
+            <div style={{
+              position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
+              left: '50%', transform: 'translateX(-50%)',
+              display: 'flex', gap: 6, zIndex: 55,
+            }}>
+              {comicPages.map((_, i) => (
+                <div
+                  key={i}
+                  onClick={e => { e.stopPropagation(); setComicPageIdx(i) }}
+                  style={{
+                    width: i === comicPageIdx ? 20 : 7,
+                    height: 7, borderRadius: 4,
+                    background: i === comicPageIdx ? 'var(--accent)' : 'rgba(255,255,255,0.35)',
+                    transition: 'width 0.2s, background 0.2s',
+                    cursor: 'pointer',
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Page counter for long comics */}
+          {comicPages.length > 20 && (
+            <div style={{
+              position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
+              left: '50%', transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.6)', borderRadius: 20, padding: '4px 14px',
+              fontSize: '0.72rem', color: 'rgba(255,255,255,0.8)', zIndex: 55,
+              backdropFilter: 'blur(4px)',
+            }}>
+              {comicPageIdx + 1} / {comicPages.length}
+            </div>
+          )}
+        </>
+      )}
 
       {/* ── Video control bar ── */}
       {isVideo && imgLoaded && (
@@ -763,7 +929,9 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
             position: 'absolute', bottom: showInfo ? 'calc(35vh + 1px)' : 0,
             left: 0, right: 0, zIndex: 60,
             background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%)',
-            padding: isMobile ? '32px 16px 18px' : '28px 20px 14px',
+            padding: isMobile
+              ? 'calc(32px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px)'
+              : '28px 20px 14px',
             display: 'flex', flexDirection: 'column', gap: isMobile ? 10 : 8,
             opacity: (isMobile ? vidPaused : ctrlVisible) ? 1 : 0,
             transition: 'opacity 0.3s, bottom 0.15s',
@@ -811,6 +979,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               }}
               onTouchStart={e => {
                 e.stopPropagation() // don't fire swipe navigation
+                touchStartX.current = e.touches[0].clientX // reset so dx=0 on release
                 scrubbing.current = true
                 const trackEl = e.currentTarget
                 const rect = trackEl.getBoundingClientRect()
@@ -1050,6 +1219,19 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       }}
     >
 
+      {postData && (isComic || comicPages.length > 1) && (
+        <button
+          className="btn-surface"
+          onClick={() => {
+            setComicLocked(v => !v)
+            if (!comicLocked) setComicPageIdx(0)
+            setMobileMenuOpen(false)
+          }}
+        >
+          📖 {comicLocked ? 'EXIT COMIC' : `OPEN COMIC (${comicPages.length}p)`}
+        </button>
+      )}
+
       {postData && !isVideo && !isComic && !comicCarouselActive && (
         <button
           className="btn-surface"
@@ -1114,7 +1296,8 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
 }
 
 const overlay = {
-  position: 'fixed', inset: 0, zIndex: 1000,
+  position: 'fixed', inset: 0, zIndex: 2500,
+  top: 'env(safe-area-inset-top)',
   background: '#000',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
 }

@@ -161,23 +161,26 @@ function FeedCard({ post, onAction, idField = 'rule34_post_id' }) {
       {!loaded && (<div style={{ height: 3, background: 'var(--surface2)' }}><div style={{ height: '100%', background: 'var(--accent)', width: `${progress}%`, transition: 'width 0.1s' }} /></div>)}
 
       {canPlayVideo ? (
-        <video
-          key={videoSrc}
-          src={videoSrc}
-          poster={displayUrl || undefined}
-          controls
-          autoPlay={false}
-          muted={false}
-          playsInline
-          onLoadedData={() => setLoaded(true)}
-          onError={() => { setVideoError(true); setLoaded(true) }}
-          onKeyDown={e => {
-            if (['ArrowLeft', 'ArrowRight', 'ArrowDown', ' '].includes(e.key)) {
-              e.stopPropagation()
-            }
-          }}
-          style={{ width: '100%', maxHeight: '60vh', background: '#000', display: 'block' }}
-        />
+        <div style={{ position: 'relative', background: '#000',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+          <video
+            key={videoSrc}
+            src={videoSrc}
+            poster={displayUrl || undefined}
+            controls
+            autoPlay={false}
+            muted={false}
+            playsInline
+            onLoadedData={() => setLoaded(true)}
+            onError={() => { setVideoError(true); setLoaded(true) }}
+            onKeyDown={e => {
+              if (['ArrowLeft', 'ArrowRight', 'ArrowDown', ' '].includes(e.key)) {
+                e.stopPropagation()
+              }
+            }}
+            style={{ width: '100%', maxHeight: '60vh', background: '#000', display: 'block' }}
+          />
+        </div>
       ) : isVideo ? (
         <div style={{
           width: '100%', minHeight: '260px', background: '#000',
@@ -805,55 +808,125 @@ export default function Subscriptions({ selection, setSelection }) {
       paddingBottom: 'var(--safe-bottom, 0px)' }}>
 
       {/* ── Tab bar ── */}
-      <div style={{
-        borderBottom: '1px solid var(--border)',
-        padding: isMobile ? '0 8px' : '0 20px',
-        display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, flexWrap: 'nowrap', overflowX: 'auto',
-      }}>
-        {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE']].map(([t, label]) => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: isMobile ? '14px 16px' : '12px 16px',
-            fontSize: isMobile ? '0.85rem' : '0.7rem',
-            letterSpacing: '0.08em', background: 'transparent', border: 'none',
-            borderBottom: `2px solid ${tab === t ? 'var(--accent)' : 'transparent'}`,
-            color: tab === t ? 'var(--accent)' : 'var(--muted)',
-            borderRadius: 0, cursor: 'pointer', flexShrink: 0,
-          }}>{label}</button>
-        ))}
-        <div style={{ flex: 1, minWidth: 8 }} />
-        {/* Fetch status — collapsed on mobile to save space */}
-        {fetchStatus && !isMobile && (
-          <div style={{ fontSize: '0.62rem', color: 'var(--muted)', maxWidth: 200, overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>
-            {fetchStatus}
+      {isMobile ? (
+        /* Mobile: two-row layout */
+        <div style={{ borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          {/* Row 1 — tabs, equal width */}
+          <div style={{ display: 'flex' }}>
+            {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE']].map(([t, label]) => (
+              <button key={t} onClick={() => setTab(t)} style={{
+                flex: 1,
+                padding: '13px 4px',
+                fontSize: '0.78rem',
+                letterSpacing: '0.06em',
+                background: 'transparent', border: 'none',
+                borderBottom: `2px solid ${tab === t ? 'var(--accent)' : 'transparent'}`,
+                color: tab === t ? 'var(--accent)' : 'var(--muted)',
+                borderRadius: 0, cursor: 'pointer',
+              }}>{label}</button>
+            ))}
           </div>
-        )}
-        <button
-          className="btn-surface"
-          onClick={fetchNew}
-          style={{
-            fontSize: isMobile ? '0.8rem' : '0.65rem',
-            padding: isMobile ? '10px 14px' : '7px 12px',
-            flexShrink: 0,
-            background: fetching ? '#7f1d1d22' : undefined,
-            borderColor: fetching ? '#dc262655' : undefined,
-            color: fetching ? '#fca5a5' : undefined,
-          }}
-        >
-          {fetching ? '■ CANCEL' : 'FETCH NEW'}
-        </button>
-        <span style={{ fontSize: '0.65rem', color: 'var(--muted)', marginLeft: 8, flexShrink: 0 }}>
-          {subs.length}
-        </span>
-      </div>
-
-      {/* Mobile fetch status row */}
-      {isMobile && fetchStatus && (
-        <div style={{ padding: '6px 12px', fontSize: '0.68rem', color: 'var(--muted)',
-          borderBottom: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
-          {fetchStatus}
+          {/* Row 2 — fetch button */}
+          <div style={{
+            padding: '8px 12px',
+            borderTop: '1px solid var(--border)',
+            background: 'var(--surface)',
+          }}>
+            <button
+              className="btn-surface"
+              onClick={fetchNew}
+              style={{
+                width: '100%',
+                fontSize: '0.8rem',
+                padding: '10px 14px',
+                background: fetching ? '#7f1d1d22' : undefined,
+                borderColor: fetching ? '#dc262655' : undefined,
+                color: fetching ? '#fca5a5' : undefined,
+              }}
+            >
+              {fetching ? '■ CANCEL FETCH' : '↓ FETCH NEW'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* Desktop: single row */
+        <div style={{
+          borderBottom: '1px solid var(--border)',
+          padding: '0 20px',
+          display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
+        }}>
+          {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE']].map(([t, label]) => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              padding: '12px 16px',
+              fontSize: '0.7rem',
+              letterSpacing: '0.08em', background: 'transparent', border: 'none',
+              borderBottom: `2px solid ${tab === t ? 'var(--accent)' : 'transparent'}`,
+              color: tab === t ? 'var(--accent)' : 'var(--muted)',
+              borderRadius: 0, cursor: 'pointer', flexShrink: 0,
+            }}>{label}</button>
+          ))}
+          <div style={{ flex: 1, minWidth: 8 }} />
+          {fetchStatus && (
+            <div style={{ fontSize: '0.62rem', color: 'var(--muted)', maxWidth: 200, overflow: 'hidden',
+              textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>
+              {fetchStatus}
+            </div>
+          )}
+          <button
+            className="btn-surface"
+            onClick={fetchNew}
+            style={{
+              fontSize: '0.65rem',
+              padding: '7px 12px',
+              flexShrink: 0,
+              background: fetching ? '#7f1d1d22' : undefined,
+              borderColor: fetching ? '#dc262655' : undefined,
+              color: fetching ? '#fca5a5' : undefined,
+            }}
+          >
+            {fetching ? '■ CANCEL' : 'FETCH NEW'}
+          </button>
+          <span style={{ fontSize: '0.65rem', color: 'var(--muted)', marginLeft: 8, flexShrink: 0 }}>
+            {subs.length}
+          </span>
         </div>
       )}
+
+      {/* Fetch status banner — prominent on mobile, subtle on desktop */}
+      {fetchStatus && (
+        <div style={{
+          padding: isMobile ? '10px 14px' : '5px 20px',
+          fontSize: isMobile ? '0.78rem' : '0.62rem',
+          color: fetching ? 'var(--text)' : 'var(--muted)',
+          background: fetching
+            ? (isMobile ? 'var(--surface2)' : 'transparent')
+            : 'transparent',
+          borderBottom: fetching && isMobile ? '1px solid var(--border)' : 'none',
+          display: 'flex', alignItems: 'center', gap: 8,
+          flexShrink: 0,
+          lineHeight: 1.4,
+          transition: 'background 0.3s',
+        }}>
+          {fetching && (
+            <span style={{
+              display: 'inline-block',
+              width: isMobile ? 8 : 6,
+              height: isMobile ? 8 : 6,
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              flexShrink: 0,
+              animation: 'pulse 1.4s ease-in-out infinite',
+            }} />
+          )}
+          <span style={{ flex: 1 }}>{fetchStatus}</span>
+        </div>
+      )}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(0.75); }
+        }
+      `}</style>
 
       {/* ── Tab content ── */}
       <div style={{ flex: 1, overflow: 'hidden' }}>

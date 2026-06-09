@@ -222,16 +222,23 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
       </button>
 
       {subselected.size > 0 && (
-        <button className="btn-accent"
-          onClick={() => {
-            const subIds = activeIds.filter(id => subselected.has(id))
-            if (subIds.length) openViewer(0, subIds)
-            if (isMobile) setMobileControlsOpen(false)
-          }}
-          style={{ width: '100%', padding: '12px', fontSize: '0.9rem',
-            background: 'rgba(34,197,94,0.2)', borderColor: 'var(--green)', color: 'var(--green)' }}>
-          ▶ VIEW SUBSELECTION ({subselected.size})
-        </button>
+        <>
+          <button className="btn-accent"
+            onClick={() => {
+              const subIds = activeIds.filter(id => subselected.has(id))
+              if (subIds.length) openViewer(0, subIds)
+              if (isMobile) setMobileControlsOpen(false)
+            }}
+            style={{ width: '100%', padding: '12px', fontSize: '0.9rem',
+              background: 'rgba(34,197,94,0.2)', borderColor: 'var(--green)', color: 'var(--green)' }}>
+            ▶ VIEW SUBSELECTION ({subselected.size})
+          </button>
+          <button className="btn-surface"
+            onClick={() => { setSubselected(new Set()); if (isMobile) setMobileControlsOpen(false) }}
+            style={{ width: '100%', color: 'var(--red)' }}>
+            ✕ CLEAR SUBSELECTION
+          </button>
+        </>
       )}
 
       <button className="btn-surface" onClick={sortRandom} style={{ width: '100%' }}>
@@ -397,19 +404,23 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
       {/* Grid */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Mobile top toolbar */}
+        {/* Mobile top toolbar — just VIEW + menu */}
         {isMobile && (
           <div style={{ display: 'flex', gap: 8, padding: '10px 10px 6px', flexShrink: 0, alignItems: 'center' }}>
-            <button className="btn-accent" onClick={() => openViewer(0)}
-              style={{ flex: 1, padding: '12px', fontSize: '0.9rem' }}>
-              ▶ VIEW {isViewingSubset ? 'SUBSET' : 'ALL'} ({activeIds.length})
+            <button className="btn-accent"
+              onClick={() => {
+                const subIds = subselected.size > 0 ? activeIds.filter(id => subselected.has(id)) : null
+                openViewer(0, subIds || undefined)
+              }}
+              style={{ flex: 1, padding: '12px', fontSize: '0.9rem',
+                ...(subselected.size > 0 ? { background: 'rgba(34,197,94,0.2)', borderColor: 'var(--green)', color: 'var(--green)' } : {})
+              }}>
+              ▶ {subselected.size > 0 ? `VIEW SUBSELECTION (${subselected.size})` : `VIEW ${isViewingSubset ? 'SUBSET' : 'ALL'} (${activeIds.length})`}
             </button>
             <button className="btn-surface" onClick={() => setMobileControlsOpen(true)}
               style={{ flexShrink: 0, padding: '12px 16px', fontSize: '0.85rem' }}>
               ☰
             </button>
-            <button className="btn-ghost"
-              onClick={() => gridRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-              style={{ flexShrink: 0, padding: '12px 14px', fontSize: '0.85rem' }}>↑</button>
           </div>
         )}
 
@@ -477,7 +488,21 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
                   }
                 }}
                 onMouseDown={e => { if (e.button === 1) e.preventDefault() }}
-                onClick={() => setDetail(detail?.id === post.id ? null : post)}
+                onClick={() => {
+                  if (isMobile) {
+                    // Toggle subselection
+                    setSubselected(prev => {
+                      const next = new Set(prev)
+                      if (next.has(post.id)) next.delete(post.id)
+                      else next.add(post.id)
+                      return next
+                    })
+                    // Also show action overlay
+                    setDetail(detail?.id === post.id ? null : post)
+                  } else {
+                    setDetail(detail?.id === post.id ? null : post)
+                  }
+                }}
                 style={{
                   position: 'relative', borderRadius: 4, overflow: 'hidden',
                   aspectRatio: '1', background: 'var(--surface2)', cursor: isMobile ? 'pointer' : 'grab',
@@ -519,7 +544,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
                     padding: '2px 5px', fontSize: '0.6rem', color: '#fff' }}>▶</div>
                 )}
 
-                {/* Overlay on tap (mobile) or hover */}
+                {/* Action overlay — desktop click or mobile tap */}
                 {detail?.id === post.id && (
                   <div style={{
                     position: 'absolute', inset: 0,
@@ -527,13 +552,15 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
                     display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8,
                   }}>
-                    <button
-                      onClick={e => { e.stopPropagation(); openViewer(idx) }}
-                      style={{ width: '100%', background: 'var(--accent)', color: '#000',
-                        border: 'none', borderRadius: 3, padding: '8px', fontSize: '0.82rem',
-                        cursor: 'pointer', fontWeight: 700 }}>
-                      ▶ VIEW
-                    </button>
+                    {!isMobile && (
+                      <button
+                        onClick={e => { e.stopPropagation(); openViewer(idx) }}
+                        style={{ width: '100%', background: 'var(--accent)', color: '#000',
+                          border: 'none', borderRadius: 3, padding: '8px', fontSize: '0.82rem',
+                          cursor: 'pointer', fontWeight: 700 }}>
+                        ▶ VIEW
+                      </button>
+                    )}
                     <button
                       onClick={e => { e.stopPropagation(); removePost(post.id) }}
                       style={{ width: '100%', background: 'rgba(220,38,38,0.8)', color: '#fff',
@@ -541,7 +568,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
                         cursor: 'pointer' }}>
                       ✕ REMOVE
                     </button>
-                    {collections.slice(0, 3).map(c => (
+                    {!isMobile && collections.slice(0, 3).map(c => (
                       <button key={c.id}
                         onClick={e => { e.stopPropagation(); addToExistingCollection(c.id) }}
                         style={{ width: '100%', background: 'var(--surface3)', color: 'var(--text)',

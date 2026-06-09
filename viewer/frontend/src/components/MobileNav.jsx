@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import useIsMobile from '../hooks/useIsMobile.js'
 
-export default function MobileNav({ tabs = [], active, onChange, onOpenViewer }) {
+export default function MobileNav({ tabs = [], active, onChange, onOpenViewer, viewerOpen, viewerIndex, viewerTotal }) {
   const isMobile = useIsMobile()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -105,6 +105,16 @@ export default function MobileNav({ tabs = [], active, onChange, onOpenViewer })
         }}>
           {activeTab?.icon && <span style={{ fontSize: '1.1rem' }}>{activeTab.icon}</span>}
           <span>{activeTab?.label ?? 'VAULT'}</span>
+          {viewerOpen && viewerTotal > 0 && (
+            <span style={{
+              fontSize: '0.68rem', color: 'var(--muted)',
+              background: 'var(--surface2)', border: '1px solid var(--border)',
+              borderRadius: 10, padding: '1px 8px', fontFamily: 'var(--font-mono)',
+              letterSpacing: '0.04em',
+            }}>
+              {viewerIndex + 1}/{viewerTotal}
+            </span>
+          )}
         </div>
 
         {/* Right side: hamburger */}

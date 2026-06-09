@@ -82,6 +82,9 @@ function AppInner({
           active={activePath}
           onChange={navigate}
           onOpenViewer={() => openViewer(getActiveIndex(selection))}
+          viewerOpen={viewerOpen}
+          viewerIndex={viewerIndex}
+          viewerTotal={(viewSubIds ?? getActiveIds(selection))?.length ?? 0}
         />
       </div>
 
