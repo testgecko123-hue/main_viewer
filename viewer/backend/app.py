@@ -87,6 +87,13 @@ SECRET_TOKEN = os.getenv('VIEWER_AUTH_TOKEN', 'Test123')
 COOKIE_NAME  = 'viewer_auth'
 
 
+# update pornhub thumbnails 
+from refresh_embed_thumbs import refresh_embed_thumbs
+
+refresh_embed_thumbs() 
+
+
+
 def _request_is_https():
     return request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https'
 

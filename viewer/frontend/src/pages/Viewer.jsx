@@ -424,6 +424,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
 
   const isVideo = (postData?.media_type === 'video' || postData?.media_type === 'vr') && !isComic
   const isVr = postData?.media_type === 'vr'
+  const isEmbed = postData?.media_type === 'embed'
   const videoSrc = postData?.file_url || postData?.cdn_url
   const canPlayVideo = isVideo && videoSrc && !videoError
 
@@ -587,6 +588,9 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
           </div>
         )}
 
+        {/* Embed placeholder — keeps media div layout consistent; actual iframe is rendered outside below */}
+        {isEmbed && <div style={{ display: 'none' }} />}
+
         {postData && canPlayVideo && (
           <video
             key={`${postData.id}-${videoSrc}`}
@@ -623,24 +627,28 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
             }}
           />
         )}
-      {/* ── Embed (e.g. Pornhub iframe) ── */}
-      {postData?.media_type === 'embed' && (
+      </div>
+
+      {/* ── Embed iframe (Pornhub etc) — full-screen, outside pointer-events:none div ── */}
+      {isEmbed && postData && (
         <iframe
           key={postData.id}
           src={postData.file_url || postData.cdn_url}
           frameBorder="0"
           allowFullScreen
           scrolling="no"
+          allow="autoplay; fullscreen"
           style={{
+            position: 'absolute',
+            inset: 0,
             width: '100%',
             height: '100%',
-            maxHeight: isMobile ? '100vh' : '100%',
             border: 'none',
-            pointerEvents: 'auto',
+            zIndex: 2,
+            background: '#000',
           }}
         />
       )}
-      </div>
 
       {/* ── Top bar ── */}
       <div style={{
@@ -667,6 +675,12 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
             VIDEO
           </span>
         )}
+        {isEmbed && !isMobile && (
+          <span style={{ background: 'rgba(255,100,0,0.15)', border: '1px solid rgba(255,100,0,0.4)',
+            borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: '#f97316' }}>
+            EMBED
+          </span>
+        )}
         {isVr && !isMobile && (
           <span style={{ background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.5)',
             borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: '#93c5fd' }}>
@@ -688,12 +702,6 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
               {comicPageIdx + 1}/{comicPages.length}
             </span>
           </button>
-        )}
-        {postData?.media_type === 'embed' && !isMobile && (
-        <span style={{ background: 'var(--surface2)', border: '1px solid var(--border)',
-          borderRadius: 3, padding: '1px 6px', fontSize: '0.62rem', color: 'var(--muted)' }}>
-          EMBED
-        </span>
         )}
 
         {/* Desktop: comic page badge */}
