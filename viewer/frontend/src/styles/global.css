@@ -16,11 +16,20 @@
   --orange:   #f59e0b;
 
   --nav-h:    52px;
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
   --font-mono: 'DM Mono', 'Courier New', monospace;
   --font-display: 'Syne', sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
 
 body {
   background: var(--bg);
@@ -31,6 +40,8 @@ body {
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Push content below status bar */
+  padding-top: var(--safe-top);
 }
 
 /* Prevent zoom on input focus on mobile */
@@ -95,17 +106,30 @@ a:hover { text-decoration: underline; }
   font-weight: 500;
 }
 
+/* ── Safe-area page shell ── */
+/* Any full-height page container should use this to avoid nav overlap and bottom bar */
+.page-shell {
+  height: calc(100vh - var(--nav-h) - var(--safe-top));
+  padding-bottom: var(--safe-bottom);
+}
+
+/* ── Bottom safe-area bar (shows under floating nav / bottom controls) ── */
+.safe-bottom-pad {
+  height: var(--safe-bottom);
+  flex-shrink: 0;
+}
+
 /* Mobile Responsive */
 @media (max-width: 768px) {
   body {
     font-size: 14px;
   }
-  
+
   button {
     padding: 12px 20px;
     font-size: 0.9rem;
   }
-  
+
   input, textarea {
     font-size: 0.85rem;
     padding: 10px 12px;
@@ -116,28 +140,28 @@ a:hover { text-decoration: underline; }
   body {
     font-size: 15px;
   }
-  
+
   button {
     padding: 14px 22px;
     font-size: 1rem;
   }
-  
+
   input, textarea {
     font-size: 0.9rem;
     padding: 12px 14px;
   }
-  
+
   /* Touch-friendly tap targets */
   button {
     min-height: 44px;
     min-width: 44px;
   }
-  
+
   /* Better touch scrolling */
   * {
     -webkit-overflow-scrolling: touch;
   }
-  
+
   /* Prevent text selection on touch */
   button, a {
     -webkit-tap-highlight-color: transparent;
