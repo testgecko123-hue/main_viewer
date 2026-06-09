@@ -7,6 +7,7 @@ import {
   newSubsetId,
 } from '../utils/selectionUtils.js'
 import { EXTERNAL_IMG_PROPS, postThumbUrl } from '../utils/mediaUtils.js'
+import { apiFetch } from '../utils/api.js'
 
 export default function Selection({ selection, setSelection, openViewer, saveStatus }) {
   const isMobile = useIsMobile()
@@ -42,7 +43,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
       chunks.map(chunk => {
         const p = new URLSearchParams()
         chunk.forEach(id => p.append('ids', id))
-        return fetch(`/api/posts/by-ids?${p}`).then(r => r.json())
+        return apiFetch(`/api/posts/by-ids?${p}`).then(r => r.json())
       })
     ).then(results => {
       const flat = results.flat()
@@ -53,7 +54,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
   }, [activeIds])
 
   useEffect(() => {
-    fetch('/api/collections').then(r => r.json()).then(setCols)
+    apiFetch('/api/collections').then(r => r.json()).then(setCols)
   }, [])
 
   useEffect(() => {
@@ -66,7 +67,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
 
   useEffect(() => {
     if (!removeTagInput.trim()) { setRemoveTagSugs([]); return }
-    fetch(`/api/tags/search?q=${encodeURIComponent(removeTagInput)}&limit=6`)
+    apiFetch(`/api/tags/search?q=${encodeURIComponent(removeTagInput)}&limit=6`)
       .then(r => r.json()).then(setRemoveTagSugs)
   }, [removeTagInput])
 
@@ -138,7 +139,7 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
   }
 
   async function removeByTag(tag) {
-    const res = await fetch(`/api/posts?needed=${encodeURIComponent(tag)}&limit=9999`)
+    const res = await apiFetch(`/api/posts?needed=${encodeURIComponent(tag)}&limit=9999`)
     const data = await res.json()
     const taggedIds = new Set((data.posts || []).map(p => p.id))
     updateActiveIds(activeIds.filter(id => !taggedIds.has(id)))
@@ -159,21 +160,21 @@ export default function Selection({ selection, setSelection, openViewer, saveSta
 
   async function saveAsCollection() {
     if (!newColName.trim()) return
-    await fetch('/api/collections', {
+    await apiFetch('/api/collections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newColName.trim(), post_ids: activeIds }),
     })
     setNewColName('')
     setAddCol(false)
-    const r = await fetch('/api/collections')
+    const r = await apiFetch('/api/collections')
     setCols(await r.json())
   }
 
   async function addToExistingCollection(colId) {
-    const col = await fetch(`/api/collections/${colId}`).then(r => r.json())
+    const col = await apiFetch(`/api/collections/${colId}`).then(r => r.json())
     const merged = [...new Set([...col.posts.map(p => p.id), ...activeIds])]
-    await fetch(`/api/collections/${colId}`, {
+    await apiFetch(`/api/collections/${colId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ post_ids: merged }),

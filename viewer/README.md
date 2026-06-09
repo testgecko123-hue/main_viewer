@@ -2,7 +2,9 @@
 
 Web app for browsing and organizing a Rule34-based media library. Posts, tags, collections, selections, and subscription feeds are stored in **Supabase (PostgreSQL)** so the same library is available from any device running the app.
 
-Instagram, taste/prediction ML, and the Capacitor Android port were removed from this app. Use the sibling [`insta/`](../insta) project for Instagram.
+Instagram and taste/prediction ML were removed from this app. Use the sibling [`insta/`](../insta) project for Instagram.
+
+The React frontend can also be built as an **Android app** via [Capacitor](https://capacitorjs.com/) (`viewer/android/`). The mobile app is a native shell around the same UI and talks to your Flask backend over the network (Supabase stays on the server).
 
 ## Stack
 
@@ -10,14 +12,18 @@ Instagram, taste/prediction ML, and the Capacitor Android port were removed from
 |-------|------|
 | Backend | Python 3, Flask, Supabase PostgreSQL |
 | Frontend | React 18, Vite, React Router |
+| Mobile | Capacitor 8 (Android) |
 | Database | Supabase (cloud PostgreSQL) |
 
 ## Project layout
 
 ```
 viewer/
+├── android/          Capacitor Android project (Gradle) — build APK/AAB here
 ├── backend/          Flask API (app.py, database.py, db.py, supabase_schema.sql)
 ├── frontend/         React UI
+├── capacitor.config.ts
+├── package.json      Capacitor CLI scripts (build:android, cap:open, …)
 ├── .env.example      Supabase connection template (copy to .env)
 ├── scripts/
 │   ├── migrate_sqlite_to_supabase.py  One-time SQLite → Supabase migration
@@ -119,6 +125,60 @@ UI at `http://localhost:5173` (proxies `/api` to the backend).
 
 Or double-click `run.bat` from the `viewer` folder.
 
+## Android app
+
+The Android build wraps the same React UI in a native WebView. It does **not** bundle the Flask backend — you need a backend reachable from your phone (your PC on LAN, or a deployed host like Render).
+
+### Prerequisites
+
+- [Android Studio](https://developer.android.com/studio) (SDK + emulator or a USB-connected device)
+- Node.js (same as frontend)
+- Backend running and reachable from the phone
+
+### 1. Point the app at your backend
+
+Create `frontend/.env` (see `frontend/.env.example`):
+
+```
+VITE_API_URL=https://your-viewer-api.example.com
+```
+
+Use your LAN IP for local testing, e.g. `http://192.168.1.10:5002` (no trailing slash). Rebuild after changing this value.
+
+### 2. Authorise the device
+
+On the phone (Chrome or in-app browser), visit once:
+
+```
+https://your-viewer-api.example.com/auth?token=<SECRET_TOKEN>
+```
+
+`SECRET_TOKEN` is in `backend/app.py`. The auth cookie lasts 30 days.
+
+### 3. Build and open in Android Studio
+
+From the `viewer` folder:
+
+```powershell
+npm install
+cd frontend
+npm install
+cd ..
+npm run build:android
+npm run cap:open
+```
+
+In Android Studio: **Build → Build Bundle(s) / APK(s)** or run on an emulator/device.
+
+### Workflow after UI changes
+
+```powershell
+npm run build:android    # rebuild web assets + sync to android/
+npm run cap:open         # optional — reopen Android Studio
+```
+
+Capacitor config lives in `capacitor.config.ts`; the native project lives entirely under `android/`.
+
 ## Using on other devices
 
 Every device runs the same backend + frontend, but all point at the **same Supabase database** via `DATABASE_URL` in `.env`:
@@ -140,13 +200,15 @@ Collections, selections, subscriptions, and the library stay in sync because the
 - **Tag groups** — Alias tags for search expansion
 - **R34 Search** — Direct Rule34 API search
 
-## Auth (LAN / remote)
+## Auth (LAN / remote / mobile)
 
-Non-localhost clients need a cookie from:
+Non-localhost clients must authenticate. Set `VIEWER_AUTH_TOKEN` in `viewer/.env` and `VITE_AUTH_TOKEN` in `frontend/.env` (same value).
 
-`http://<host>:5002/auth?token=<SECRET_TOKEN>`
+The app sends `X-Viewer-Token` automatically when `VITE_API_URL` is set. Alternatively, visit once in a browser:
 
-Token is set in `backend/app.py` (`SECRET_TOKEN`). Change it before exposing the server.
+`http://<host>:5002/auth?token=<VIEWER_AUTH_TOKEN>`
+
+Change the token before exposing the server publicly.
 
 ## Remote deploy
 
@@ -157,4 +219,4 @@ See [deploy.md](deploy.md) for Render.com setup. Set `DATABASE_URL` in the host 
 - Local-only SQLite as primary store (replaced by Supabase)
 - Instagram scraping, CDN proxy, `ig_subscriptions`
 - Taste engine (CLIP embeddings, predictions, UMAP, generate-selection)
-- Capacitor / Android / offline sql.js mobile build
+- Offline sql.js mobile build (Android now uses the remote Flask API)

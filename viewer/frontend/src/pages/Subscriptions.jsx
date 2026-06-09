@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { gridCols, GRID } from '../config/gridConfig.js'
+import { apiFetch, apiEventSource } from '../utils/api.js'
 
 function loadStored(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback }
@@ -25,7 +26,7 @@ async function fetchTagWithBackoff(tag, signal, attempt = 0) {
   const url = `/api/subscriptions/fetch-one?tag=${encodeURIComponent(tag)}`
   let res
   try {
-    res = await fetch(url, { method: 'POST', signal })
+    res = await apiFetch(url, { method: 'POST', signal })
   } catch (err) {
     if (err.name === 'AbortError') throw err
     throw new Error(`Network error for "${tag}": ${err.message}`)
@@ -90,7 +91,7 @@ function ExcludeInput({ excluded, onChange }) {
     if (!input.trim()) { setSugs([]); return }
     clearTimeout(debounce.current)
     debounce.current = setTimeout(async () => {
-      const res = await fetch(`/api/tags/search?q=${encodeURIComponent(input)}&limit=6`)
+      const res = await apiFetch(`/api/tags/search?q=${encodeURIComponent(input)}&limit=6`)
       setSugs(await res.json())
     }, 150)
   }, [input])
@@ -321,7 +322,7 @@ function BrowseTab({ subs }) {
     excluded.forEach(t => p.append('exclude', t))
     const nextPage = _page !== null ? _page : (reset ? 0 : page)
     p.set('page', nextPage); p.set('limit', LIMIT)
-    const res = await fetch(`/api/subscriptions/browse?${p}`)
+    const res = await apiFetch(`/api/subscriptions/browse?${p}`)
     const data = await res.json()
     const newPosts = data.posts || []
     const accumulated = (_page === null && reset) ? newPosts : [..._accumulated, ...newPosts]
@@ -409,7 +410,7 @@ export default function Subscriptions({ selection, setSelection }) {
   const subValue = s => s.tag_name
   async function refreshSubs() {
     const endpoint = '/api/subscriptions'
-    setSubs(await fetch(endpoint).then(r => r.json()))
+    setSubs(await apiFetch(endpoint).then(r => r.json()))
   }
 
   useEffect(() => { refreshSubs() }, [])
@@ -424,7 +425,7 @@ export default function Subscriptions({ selection, setSelection }) {
       const p = new URLSearchParams()
       selectedTags.forEach(t => p.append('subs', t))
       p.set('page', 0); p.set('limit', 100)
-      const res  = await fetch(`/api/subscriptions/browse?${p}`)
+      const res  = await apiFetch(`/api/subscriptions/browse?${p}`)
       const data = await res.json()
       const posts = (data.posts || [])
         .filter(p => !p.owned)
@@ -439,7 +440,7 @@ export default function Subscriptions({ selection, setSelection }) {
         }))
       setFeed(posts)
     } else {
-      const res = await fetch('/api/feed?status=unseen&limit=100')
+      const res = await apiFetch('/api/feed?status=unseen&limit=100')
       setFeed(await res.json())
     }
   }
@@ -518,7 +519,7 @@ export default function Subscriptions({ selection, setSelection }) {
       signal.addEventListener('abort', () => done(confirmed), { once: true })
 
       try {
-        es = new EventSource('/api/subscriptions/fetch-stream')
+        es = apiEventSource('/api/subscriptions/fetch-stream')
 
         es.addEventListener('progress', e => {
           confirmed = true
@@ -588,7 +589,7 @@ export default function Subscriptions({ selection, setSelection }) {
   async function tryPerTagFetch(signal) {
     // Probe the endpoint with a HEAD-like request to see if it exists
     try {
-      const probe = await fetch('/api/subscriptions/fetch-one?tag=__probe__', {
+      const probe = await apiFetch('/api/subscriptions/fetch-one?tag=__probe__', {
         method: 'POST', signal,
         headers: { 'X-Probe': '1' }
       })
@@ -651,7 +652,7 @@ export default function Subscriptions({ selection, setSelection }) {
   // Bulk fallback (original behavior)
   async function bulkFetch(signal) {
     setFetchStatus('Fetching (bulk)…')
-    const res = await fetch('/api/subscriptions/fetch', { method: 'POST', signal })
+    const res = await apiFetch('/api/subscriptions/fetch', { method: 'POST', signal })
     const data = await res.json()
     setProgressLog(data.progress || [])
     setFetchErrors((data.errors || []).slice(0, 8))
@@ -665,7 +666,7 @@ export default function Subscriptions({ selection, setSelection }) {
     setFeed(prev => prev.filter(p => p[idField] !== postId))
     const normalizedAction = action
     const endpoint = `/api/feed/${postId}/action`
-    fetch(endpoint, {
+    apiFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: normalizedAction })
@@ -699,21 +700,21 @@ export default function Subscriptions({ selection, setSelection }) {
 
   async function addSub(tag) {
     if (!tag.trim()) return
-    await fetch('/api/subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag_name: tag.trim() }) })
+    await apiFetch('/api/subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag_name: tag.trim() }) })
     await refreshSubs()
   }
   async function removeSub(value) {
-    await fetch(`/api/subscriptions/${encodeURIComponent(value)}`, { method: 'DELETE' })
+    await apiFetch(`/api/subscriptions/${encodeURIComponent(value)}`, { method: 'DELETE' })
     setSubs(subs.filter(s => s.tag_name !== value))
   }
   async function bulkAddSubs(raw) {
     const tags = raw.split(/[,\n]/).map(t => t.trim()).filter(Boolean)
     if (!tags.length) return
-    await fetch('/api/subscriptions/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags }) })
+    await apiFetch('/api/subscriptions/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags }) })
     await refreshSubs()
   }
   async function markAllSeen() {
-    await fetch('/api/subscriptions/mark_seen', { method: 'POST' })
+    await apiFetch('/api/subscriptions/mark_seen', { method: 'POST' })
     await loadFeed()
   }
 

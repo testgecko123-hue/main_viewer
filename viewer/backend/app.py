@@ -49,7 +49,24 @@ class _AppJSON(DefaultJSONProvider):
 
 
 app.json = _AppJSON(app)
-CORS(app)  # allow React dev server to call the API
+
+def _cors_origins():
+    origins = [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'https://localhost',
+        'capacitor://localhost',
+        # Private LAN dev (phone / other PCs on same network)
+        re.compile(r'^https?://192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$'),
+        re.compile(r'^https?://10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$'),
+        re.compile(r'^https?://172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(:\d+)?$'),
+    ]
+    raw = os.getenv('CORS_ORIGINS', '')
+    origins.extend(o.strip() for o in raw.split(',') if o.strip())
+    return origins
+
+
+CORS(app, supports_credentials=True, origins=_cors_origins())
 
 R34_API   = "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index"
 API_KEY   = "e4bbcb7881e3f87ce9c4289526dd6343ad2792022fa1b3cc41464030d05fca703565fbe627cb296ffce35e8422549e07d0bb9b94fd87433af5b6a94cc9702257"
@@ -60,12 +77,33 @@ HEADERS   = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKi
 SKIP_IF_FETCHED_WITHIN_SECS = 8 * 60
 
 # ── Auth / Whitelist ──────────────────────────────────────────────────────────
-# Change SECRET_TOKEN to any password you want.
-# To whitelist a new device visit: http://<host>:5002/auth?token=<SECRET_TOKEN>
-# The device will be authorised for 30 days via a cookie.
+# Set VIEWER_AUTH_TOKEN in .env (or Render env vars). Clients authenticate via:
+#   • Cookie from GET /auth?token=<token>  (browser / same-site)
+#   • Header X-Viewer-Token: <token>       (Capacitor / cross-origin)
+#   • Header Authorization: Bearer <token>
+#   • Query ?viewer_token=<token>          (EventSource / SSE)
 
-SECRET_TOKEN = 'Test123'
+SECRET_TOKEN = os.getenv('VIEWER_AUTH_TOKEN', 'Test123')
 COOKIE_NAME  = 'viewer_auth'
+
+
+def _request_is_https():
+    return request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https'
+
+
+def _is_authorized():
+    if request.cookies.get(COOKIE_NAME) == SECRET_TOKEN:
+        return True
+    header_token = request.headers.get('X-Viewer-Token', '')
+    if header_token and header_token == SECRET_TOKEN:
+        return True
+    auth_hdr = request.headers.get('Authorization', '')
+    if auth_hdr.startswith('Bearer ') and auth_hdr[7:] == SECRET_TOKEN:
+        return True
+    if request.args.get('viewer_token') == SECRET_TOKEN:
+        return True
+    return False
+
 
 @app.route('/auth')
 def auth_gate():
@@ -76,23 +114,28 @@ def auth_gate():
             <p>This device is whitelisted for 30 days. You can close this tab.</p>
             </body></html>
         ''')
-        resp.set_cookie(COOKIE_NAME, SECRET_TOKEN,
-                        max_age=60 * 60 * 24 * 30,
-                        httponly=True, samesite='Lax')
+        secure = _request_is_https()
+        resp.set_cookie(
+            COOKIE_NAME, SECRET_TOKEN,
+            max_age=60 * 60 * 24 * 30,
+            httponly=True,
+            secure=secure,
+            samesite='None' if secure else 'Lax',
+        )
         return resp
     return '', 403
+
 
 @app.before_request
 def check_auth():
     logger.info(f"{request.method} {request.path} | args={dict(request.args)}")
-    # Always allow requests from this machine itself
+    if request.method == 'OPTIONS':
+        return
     if request.remote_addr in ('127.0.0.1', '::1'):
         return
-    # The /auth route must be reachable so devices can get their cookie
     if request.path == '/auth':
         return
-    # Everyone else must have the auth cookie
-    if request.cookies.get(COOKIE_NAME) != SECRET_TOKEN:
+    if not _is_authorized():
         return '', 403
 
 
@@ -1593,8 +1636,9 @@ def api_import_post():
         return jsonify({"error": str(e)}), 500
 
 
+# Ensure schema exists when started via gunicorn (Render, etc.).
+if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+    init_db(quiet=True)
+
 if __name__ == '__main__':
-    # Run once before the debug reloader spawns (child reuses the same DB).
-    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-        init_db(quiet=True)
     app.run(host='0.0.0.0', debug=True, port=5002)

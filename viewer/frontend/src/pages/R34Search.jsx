@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import TagSearch from '../components/TagSearch.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
 import { gridCols, GRID } from '../config/gridConfig.js'
+import { apiFetch } from '../utils/api.js'
 
 // ── Tiny R34 thumbnail card ───────────────────────────────────────────────────
 
@@ -183,7 +184,7 @@ export default function R34Search() {
     }
     const pg = reset ? 0 : page
     try {
-      const res  = await fetch(`/api/r34/search?${buildParams(pg)}`)
+      const res  = await apiFetch(`/api/r34/search?${buildParams(pg)}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Search failed')
       const incoming = data.posts || []
@@ -225,7 +226,7 @@ export default function R34Search() {
   async function savePost(post) {
     setSaving(prev => new Set(prev).add(post.id))
     try {
-      const res  = await fetch('/api/r34/save', {
+      const res  = await apiFetch('/api/r34/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ post }),
@@ -255,7 +256,7 @@ export default function R34Search() {
     setImporting(true)
     setImportStatus(null)
     try {
-      const res = await fetch('/api/posts/import', {
+      const res = await apiFetch('/api/posts/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, force: forceImport }),

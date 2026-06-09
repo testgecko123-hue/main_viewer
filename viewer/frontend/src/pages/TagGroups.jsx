@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiFetch } from '../utils/api.js'
 
 export default function TagGroups() {
   const [groups, setGroups]   = useState([])
@@ -20,17 +21,17 @@ export default function TagGroups() {
 
   useEffect(() => {
     loadGroups()
-    fetch('/api/tags?limit=500').then(r => r.json()).then(setAllTags)
+    apiFetch('/api/tags?limit=500').then(r => r.json()).then(setAllTags)
   }, [])
 
   async function loadGroups() {
-    const res = await fetch('/api/tag-groups')
+    const res = await apiFetch('/api/tag-groups')
     setGroups(await res.json())
   }
 
   useEffect(() => {
     if (!tagSearch.trim()) { setSugs([]); return }
-    fetch(`/api/tags/search?q=${encodeURIComponent(tagSearch)}&limit=8`)
+    apiFetch(`/api/tags/search?q=${encodeURIComponent(tagSearch)}&limit=8`)
       .then(r => r.json()).then(setSugs)
   }, [tagSearch])
 
@@ -38,7 +39,7 @@ export default function TagGroups() {
     const name = newName.trim()
     const members = newMembers.split(',').map(t => t.trim().toLowerCase().replace(/ /g,'_')).filter(Boolean)
     if (!name || members.length < 2) return
-    await fetch('/api/tag-groups', {
+    await apiFetch('/api/tag-groups', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ group_name: name, members }),
@@ -48,7 +49,7 @@ export default function TagGroups() {
   }
 
   async function deleteGroup(name) {
-    await fetch(`/api/tag-groups/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    await apiFetch(`/api/tag-groups/${encodeURIComponent(name)}`, { method: 'DELETE' })
     loadGroups()
   }
 

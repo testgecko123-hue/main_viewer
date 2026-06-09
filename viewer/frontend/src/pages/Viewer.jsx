@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import useIsMobile from '../hooks/useIsMobile.js'
 import { getActiveIndex, setActiveIndex } from '../utils/selectionUtils.js'
 import { EXTERNAL_IMG_PROPS, preloadImage } from '../utils/mediaUtils.js'
+import { apiFetch } from '../utils/api.js'
 
 // Ratio threshold above which an image is treated as a vertical comic strip
 const COMIC_RATIO = 2.5
@@ -128,7 +129,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       setLoad(false)
     } else {
       setLoad(true)
-      fetch(`/api/posts/${id}`)
+      apiFetch(`/api/posts/${id}`)
         .then(r => r.json())
         .then(d => {
           setPost(d)
@@ -141,7 +142,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     const toPreload = [ids[idx + 1], ids[idx - 1], ids[idx + 2]].filter(Boolean)
     toPreload.forEach(pid => {
       if (!cache[pid]) {
-        fetch(`/api/posts/${pid}`)
+        apiFetch(`/api/posts/${pid}`)
           .then(r => r.json())
           .then(d => setCache(prev => ({ ...prev, [pid]: d })))
       }
@@ -222,7 +223,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       let post = localCache[id]
       if (!post) {
         try {
-          const res = await fetch(`/api/posts/${id}`)
+          const res = await apiFetch(`/api/posts/${id}`)
           post = await res.json()
           localCache[id] = post
           setCache(prev => ({ ...prev, [id]: post }))
@@ -282,7 +283,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     setAutoMatch({ loading: true, candidates: [], search_tags: [], post_id: postData.id })
     setAutoMatchMsg('')
     try {
-      const res = await fetch(`/api/posts/${postData.id}/auto-match`, {
+      const res = await apiFetch(`/api/posts/${postData.id}/auto-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ auto_apply: false }),
@@ -301,7 +302,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
   }
 
   async function applyCandidate(postId, r34Id) {
-    const res = await fetch(`/api/posts/${postId}/auto-match`, {
+    const res = await apiFetch(`/api/posts/${postId}/auto-match`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apply: true, r34_id: r34Id }),
@@ -320,7 +321,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
     setR34Status('loading')
     setR34Msg('')
     try {
-      const res = await fetch(`/api/posts/${postData.id}/update-from-r34`, {
+      const res = await apiFetch(`/api/posts/${postData.id}/update-from-r34`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ r34_url: r34Url.trim() }),

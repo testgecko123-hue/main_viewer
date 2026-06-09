@@ -3,6 +3,7 @@ import TagSearch from '../components/TagSearch.jsx'
 import PostGrid from '../components/PostGrid.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
 import { EXTERNAL_IMG_PROPS, parseSourceMeta, postThumbUrl } from '../utils/mediaUtils.js'
+import { apiFetch } from '../utils/api.js'
 
 const LIMIT = 60
 
@@ -48,7 +49,7 @@ export default function Library({ selection, setSelection, openViewer }) {
         setOffset(0)
         setTotal(0)
       }
-      const res = await fetch(`/api/posts?${buildParams(reset ? 0 : off)}`)
+      const res = await apiFetch(`/api/posts?${buildParams(reset ? 0 : off)}`)
       const data = await res.json()
       const newPosts = data.posts || []
       const total = data.total ?? 0
@@ -106,7 +107,7 @@ export default function Library({ selection, setSelection, openViewer }) {
     setImporting(true)
     setImportStatus(null)
     try {
-      const res = await fetch('/api/posts/import', {
+      const res = await apiFetch('/api/posts/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
@@ -132,7 +133,7 @@ export default function Library({ selection, setSelection, openViewer }) {
   }
 
   async function fetchDetail(id) {
-    const res = await fetch(`/api/posts/${id}`)
+    const res = await apiFetch(`/api/posts/${id}`)
     setDetail(await res.json())
   }
 
@@ -150,7 +151,7 @@ export default function Library({ selection, setSelection, openViewer }) {
     setAutoMatch({ loading: true, candidates: [], search_tags: [], post_id: postId })
     setAutoMatchMsg('')
     try {
-      const res = await fetch(`/api/posts/${postId}/auto-match`, {
+      const res = await apiFetch(`/api/posts/${postId}/auto-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ auto_apply: false }),
@@ -176,7 +177,7 @@ export default function Library({ selection, setSelection, openViewer }) {
   }
 
   async function applyCandidate(postId, r34Id) {
-    const res = await fetch(`/api/posts/${postId}/auto-match`, {
+    const res = await apiFetch(`/api/posts/${postId}/auto-match`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apply: true, r34_id: r34Id }),
@@ -195,7 +196,7 @@ export default function Library({ selection, setSelection, openViewer }) {
     setR34Status('loading')
     setR34Msg('')
     try {
-      const res = await fetch(`/api/posts/${postId}/update-from-r34`, {
+      const res = await apiFetch(`/api/posts/${postId}/update-from-r34`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ r34_url: r34UpdateUrl.trim() }),
@@ -219,7 +220,7 @@ export default function Library({ selection, setSelection, openViewer }) {
   }
 
   async function deletePost(id) {
-    await fetch(`/api/posts/${id}`, { method: 'DELETE' })
+    await apiFetch(`/api/posts/${id}`, { method: 'DELETE' })
     setPosts(prev => prev.filter(p => p.id !== id))
     setTotal(t => t - 1)
     setDetail(null)

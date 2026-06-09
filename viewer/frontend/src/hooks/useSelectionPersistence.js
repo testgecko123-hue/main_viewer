@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { EMPTY_SELECTION } from '../utils/selectionUtils.js'
+import { apiFetch } from '../utils/api.js'
 
 const SAVE_DEBOUNCE_MS = 500
 
@@ -43,7 +44,7 @@ export default function useSelectionPersistence(selection, setSelection) {
   selectionRef.current = selection
 
   useEffect(() => {
-    fetch('/api/selections/current')
+    apiFetch('/api/selections/current')
       .then(r => r.json())
       .then(data => {
         const normalized = normalizeSelection(data)
@@ -62,7 +63,7 @@ export default function useSelectionPersistence(selection, setSelection) {
     const s = sel || selectionRef.current
     const body = serializeSelection(s)
     setSaveStatus('saving')
-    return fetch('/api/selections/current', {
+    return apiFetch('/api/selections/current', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body,
@@ -94,7 +95,7 @@ export default function useSelectionPersistence(selection, setSelection) {
   useEffect(() => {
     const onUnload = () => {
       const s = selectionRef.current
-      fetch('/api/selections/current', {
+      apiFetch('/api/selections/current', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: serializeSelection(s),

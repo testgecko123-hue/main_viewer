@@ -4,6 +4,7 @@ import PostGrid from '../components/PostGrid.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
 import { gridCols, GRID } from '../config/gridConfig.js'
 import { EXTERNAL_IMG_PROPS, postThumbUrl } from '../utils/mediaUtils.js'
+import { apiFetch } from '../utils/api.js'
 
 const LIMIT = 60
 const EMPTY_SEARCH = { needed: [], optional: [], exclude: [] }
@@ -201,7 +202,7 @@ export default function Browse({ selection, setSelection, openViewer }) {
     try {
       const p = buildFilterParams()
       if (anchorOff != null) p.set('anchor_offset', String(anchorOff))
-      const res = await fetch(`/api/posts/browse-meta?${p}`)
+      const res = await apiFetch(`/api/posts/browse-meta?${p}`)
       const data = await res.json()
       setMeta(data)
       if (data.anchor) setAnchor(data.anchor)
@@ -225,7 +226,7 @@ export default function Browse({ selection, setSelection, openViewer }) {
   useEffect(() => {
     if (mode === 'collection' && collections.length === 0 && !colsLoading) {
       setColsLoading(true)
-      fetch('/api/collections')
+      apiFetch('/api/collections')
         .then(r => r.json())
         .then(data => { setCols(data); setColsLoading(false) })
         .catch(() => setColsLoading(false))
@@ -270,7 +271,7 @@ export default function Browse({ selection, setSelection, openViewer }) {
         order,
         ...dateExtra,
       })
-      const res = await fetch(`/api/posts?${p}`)
+      const res = await apiFetch(`/api/posts?${p}`)
       const data = await res.json()
       const newPosts = data.posts || []
       setScrollPosts(prev => reset ? newPosts : [...prev, ...newPosts])
@@ -317,7 +318,7 @@ export default function Browse({ selection, setSelection, openViewer }) {
     setSampleRemoved(new Set())
     try {
       const p = buildFilterParams({ buckets, per_bucket: perBucket })
-      const res = await fetch(`/api/posts/stratified-random?${p}`)
+      const res = await apiFetch(`/api/posts/stratified-random?${p}`)
       const data = await res.json()
       setSamplePosts(data.posts || [])
     } catch (e) {
@@ -332,7 +333,7 @@ export default function Browse({ selection, setSelection, openViewer }) {
     setRandRemoved(new Set())
     try {
       const p = buildFilterParams({ count: randCount })
-      const res = await fetch(`/api/posts/random?${p}`)
+      const res = await apiFetch(`/api/posts/random?${p}`)
       const data = await res.json()
       setRandPosts(data.posts || [])
     } catch (e) {
@@ -348,7 +349,7 @@ export default function Browse({ selection, setSelection, openViewer }) {
     setColRemoved(new Set())
     setColBrowseOffset(0)
     try {
-      const res = await fetch(`/api/collections/${selectedCol}`)
+      const res = await apiFetch(`/api/collections/${selectedCol}`)
       const data = await res.json()
       let pool = data.posts || []
       if (colMediaType) pool = pool.filter(p => p.media_type === colMediaType)

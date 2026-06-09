@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { apiFetch } from '../utils/api.js'
 
 const PILL_COLORS = {
   needed:   { bg: '#14532d33', border: '#22c55e55', text: '#86efac', label: 'NEED'    },
@@ -58,7 +59,7 @@ export default function TagSearch({ value, onChange, onSearch, singleMode = null
     if (!input.trim()) { setSugs([]); return }
     clearTimeout(debounce.current)
     debounce.current = setTimeout(async () => {
-      const res = await fetch(`/api/tags/search?q=${encodeURIComponent(input)}&limit=10`)
+      const res = await apiFetch(`/api/tags/search?q=${encodeURIComponent(input)}&limit=10`)
       const data = await res.json()
       setSugs(data)
       setSugIdx(-1)

@@ -1,0 +1,17 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: connect this repo in Render → New → Blueprint, or create a Web Service manually.
+services:
+  - type: web
+    name: vault-viewer-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 app:app
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: VIEWER_AUTH_TOKEN
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: capacitor://localhost,https://localhost

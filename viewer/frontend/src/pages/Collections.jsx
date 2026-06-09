@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import TagSearch from '../components/TagSearch.jsx'
 import useIsMobile from '../hooks/useIsMobile.js'
 import { gridCols, GRID } from '../config/gridConfig.js'
+import { apiFetch } from '../utils/api.js'
 
 const EMPTY_COL_TAGS = { needed: [], optional: [], exclude: [] }
 
@@ -29,8 +30,8 @@ export default function Collections({ selection, setSelection, openViewer }) {
   useEffect(() => { multiReviewRef.current = multiReview }, [multiReview])
 
   useEffect(() => {
-    fetch('/api/collections').then(r => r.json()).then(setCols)
-    fetch('/api/selections').then(r => r.json()).then(setSels)
+    apiFetch('/api/collections').then(r => r.json()).then(setCols)
+    apiFetch('/api/selections').then(r => r.json()).then(setSels)
   }, [])
 
   useEffect(() => {
@@ -45,54 +46,54 @@ export default function Collections({ selection, setSelection, openViewer }) {
   async function loadActive(type, id) {
     setActive({ type, id })
     if (type === 'col') {
-      const res = await fetch(`/api/collections/${id}`)
+      const res = await apiFetch(`/api/collections/${id}`)
       setData(await res.json())
     } else {
-      const res = await fetch(`/api/selections/${id}`)
+      const res = await apiFetch(`/api/selections/${id}`)
       setData(await res.json())
     }
   }
 
   async function createCollection() {
     if (!newName.trim()) return
-    const res = await fetch('/api/collections', {
+    const res = await apiFetch('/api/collections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName.trim(), post_ids: selection.ids }),
     })
     const data = await res.json()
     setNewName('')
-    const r = await fetch('/api/collections')
+    const r = await apiFetch('/api/collections')
     setCols(await r.json())
     loadActive('col', data.id)
   }
 
   async function saveCurrentSelection() {
     if (!newName.trim()) return
-    const res = await fetch('/api/selections', {
+    const res = await apiFetch('/api/selections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ post_ids: selection.ids, name: newName.trim(), is_saved: true }),
     })
     await res.json()
     setNewName('')
-    const r = await fetch('/api/selections')
+    const r = await apiFetch('/api/selections')
     setSels(await r.json())
   }
 
   async function promoteSelection(selId) {
     if (!newName.trim()) return
-    await fetch(`/api/selections/${selId}/promote`, {
+    await apiFetch(`/api/selections/${selId}/promote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName.trim() }),
     })
-    const [rc, rs] = await Promise.all([fetch('/api/collections'), fetch('/api/selections')])
+    const [rc, rs] = await Promise.all([apiFetch('/api/collections'), apiFetch('/api/selections')])
     setCols(await rc.json()); setSels(await rs.json())
   }
 
   async function deleteCollection(id) {
-    await fetch(`/api/collections/${id}`, { method: 'DELETE' })
+    await apiFetch(`/api/collections/${id}`, { method: 'DELETE' })
     setCols(cols => cols.filter(c => c.id !== id))
     if (active?.id === id) { setActive(null); setData(null); setReviewOpen(false) }
   }
@@ -104,7 +105,7 @@ export default function Collections({ selection, setSelection, openViewer }) {
 
   async function removeFromCollection(postId) {
     const newIds = activeData.posts.filter(p => p.id !== postId).map(p => p.id)
-    await fetch(`/api/collections/${active.id}`, {
+    await apiFetch(`/api/collections/${active.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ post_ids: newIds }),
@@ -119,7 +120,7 @@ export default function Collections({ selection, setSelection, openViewer }) {
     const tags = colTagSearch.optional
     setSearchSaveStatus('saving')
     try {
-      await fetch(`/api/collections/${active.id}`, {
+      await apiFetch(`/api/collections/${active.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ search_tags: tags }),
@@ -142,7 +143,7 @@ export default function Collections({ selection, setSelection, openViewer }) {
 
   const loadCollectionIntoState = useCallback(async (colId) => {
     setActive({ type: 'col', id: colId })
-    const res = await fetch(`/api/collections/${colId}`)
+    const res = await apiFetch(`/api/collections/${colId}`)
     const data = await res.json()
     setData(data)
     setColTagSearch({
@@ -172,8 +173,8 @@ export default function Collections({ selection, setSelection, openViewer }) {
     setReviewLoading(true)
     try {
       await loadCollectionIntoState(next.id)
-      setCols(await fetch('/api/collections').then(r => r.json()))
-      const rq = await fetch(`/api/collections/${next.id}/review-queue?limit=80`).then(r => r.json())
+      setCols(await apiFetch('/api/collections').then(r => r.json()))
+      const rq = await apiFetch(`/api/collections/${next.id}/review-queue?limit=80`).then(r => r.json())
       await applyReviewQueuePosts(rq.posts || [])
     } finally {
       setReviewLoading(false)
@@ -189,17 +190,17 @@ export default function Collections({ selection, setSelection, openViewer }) {
     }
     setMultiReview(null)
     multiReviewRef.current = null
-    await fetch(`/api/collections/${active.id}`, {
+    await apiFetch(`/api/collections/${active.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ search_tags: tags }),
     })
     setData(d => ({ ...d, search_tags: tags }))
-    setCols(await fetch('/api/collections').then(r => r.json()))
+    setCols(await apiFetch('/api/collections').then(r => r.json()))
     setReviewOpen(true)
     setReviewLoading(true)
     try {
-      const res = await fetch(`/api/collections/${active.id}/review-queue?limit=80`)
+      const res = await apiFetch(`/api/collections/${active.id}/review-queue?limit=80`)
       const data = await res.json()
       setReviewQueue(data.posts || [])
     } finally {
@@ -208,7 +209,7 @@ export default function Collections({ selection, setSelection, openViewer }) {
   }
 
   async function openReviewAllCollections() {
-    const fresh = await fetch('/api/collections').then(r => r.json())
+    const fresh = await apiFetch('/api/collections').then(r => r.json())
     const withTags = fresh
       .filter(c => Array.isArray(c.search_tags) && c.search_tags.length > 0)
       .map(c => ({ id: c.id, name: c.name }))
@@ -225,7 +226,7 @@ export default function Collections({ selection, setSelection, openViewer }) {
       const first = withTags[0]
       await loadCollectionIntoState(first.id)
       setCols(fresh)
-      const rq = await fetch(`/api/collections/${first.id}/review-queue?limit=80`).then(r => r.json())
+      const rq = await apiFetch(`/api/collections/${first.id}/review-queue?limit=80`).then(r => r.json())
       await applyReviewQueuePosts(rq.posts || [])
     } finally {
       setReviewLoading(false)
@@ -237,33 +238,33 @@ export default function Collections({ selection, setSelection, openViewer }) {
   const onReviewAdd = useCallback(async () => {
     const cur = reviewQueue[0]
     if (!cur || active?.type !== 'col') return
-    await fetch(`/api/collections/${active.id}/review-action`, {
+    await apiFetch(`/api/collections/${active.id}/review-action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'add', post_id: cur.id }),
     })
-    const res = await fetch(`/api/collections/${active.id}`)
+    const res = await apiFetch(`/api/collections/${active.id}`)
     setData(await res.json())
-    setCols(await fetch('/api/collections').then(r => r.json()))
-    const rq = await fetch(`/api/collections/${active.id}/review-queue?limit=80`).then(r => r.json())
+    setCols(await apiFetch('/api/collections').then(r => r.json()))
+    const rq = await apiFetch(`/api/collections/${active.id}/review-queue?limit=80`).then(r => r.json())
     await applyReviewQueuePosts(rq.posts || [])
   }, [reviewQueue, active?.id, active?.type, applyReviewQueuePosts])
 
   const onReviewIgnore = useCallback(async () => {
     const cur = reviewQueue[0]
     if (!cur || active?.type !== 'col') return
-    await fetch(`/api/collections/${active.id}/review-action`, {
+    await apiFetch(`/api/collections/${active.id}/review-action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'ignore', post_id: cur.id }),
     })
-    const rq = await fetch(`/api/collections/${active.id}/review-queue?limit=80`).then(r => r.json())
+    const rq = await apiFetch(`/api/collections/${active.id}/review-queue?limit=80`).then(r => r.json())
     await applyReviewQueuePosts(rq.posts || [])
   }, [reviewQueue, active?.id, active?.type, applyReviewQueuePosts])
 
   const onReviewIgnoreAll = useCallback(async () => {
     if (!reviewQueue.length || active?.type !== 'col') return
-    await fetch(`/api/collections/${active.id}/review-action`, {
+    await apiFetch(`/api/collections/${active.id}/review-action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'ignore_all', stack_ids: reviewQueue.map(p => p.id) }),
