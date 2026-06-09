@@ -143,6 +143,11 @@ def check_auth():
 def serve_frontend():
     return jsonify({"status": "ok", "message": "API running. Frontend at http://localhost:3000"})
 
+@app.route('/health')
+def health_check():
+    """Lightweight health check for Render - doesn't touch database"""
+    return jsonify({"status": "healthy"}), 200
+
 # ── Posts ─────────────────────────────────────────────────────────────────────
 
 def _parse_post_filters():

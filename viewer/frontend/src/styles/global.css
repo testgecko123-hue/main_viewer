@@ -29,6 +29,13 @@ body {
   font-size: 13px;
   min-height: 100vh;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Prevent zoom on input focus on mobile */
+input, textarea, select {
+  font-size: 16px !important;
 }
 
 /* Scrollbar */
@@ -86,4 +93,54 @@ a:hover { text-decoration: underline; }
   font-size: 0.65rem;
   letter-spacing: 0.06em;
   font-weight: 500;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  body {
+    font-size: 14px;
+  }
+  
+  button {
+    padding: 12px 20px;
+    font-size: 0.9rem;
+  }
+  
+  input, textarea {
+    font-size: 0.85rem;
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    font-size: 15px;
+  }
+  
+  button {
+    padding: 14px 22px;
+    font-size: 1rem;
+  }
+  
+  input, textarea {
+    font-size: 0.9rem;
+    padding: 12px 14px;
+  }
+  
+  /* Touch-friendly tap targets */
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Better touch scrolling */
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Prevent text selection on touch */
+  button, a {
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
 }
