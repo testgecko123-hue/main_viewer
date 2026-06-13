@@ -1657,6 +1657,8 @@ def api_import_post():
         db.close()
         return jsonify({"error": str(e)}), 500
 
+from refresh_embed_thumbs import refresh_embed_thumbs
+refresh_embed_thumbs(background=True, quiet=True)
 
 # Ensure schema exists when started via gunicorn (Render, etc.).
 if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
