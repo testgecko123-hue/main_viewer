@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy } from 'react'
 import useIsMobile from '../hooks/useIsMobile.js'
 import { getActiveIndex, setActiveIndex } from '../utils/selectionUtils.js'
 import { EXTERNAL_IMG_PROPS, preloadImage } from '../utils/mediaUtils.js'
@@ -428,6 +428,14 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
   const videoSrc = postData?.file_url || postData?.cdn_url
   const canPlayVideo = isVideo && videoSrc && !videoError
 
+  // Keep a stable embed src — only update when the post id actually changes,
+  // so background cache updates don't remount the iframe mid-load.
+  const embedSrcRef = useRef('')
+  if (isEmbed && postData) {
+    const newSrc = postData.file_url || postData.cdn_url || ''
+    if (newSrc !== embedSrcRef.current) embedSrcRef.current = newSrc
+  }
+
   // Preload bar colours
   const preloadPct = preloadState
     ? Math.round((preloadState.loaded / preloadState.total) * 100)
@@ -630,12 +638,13 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       </div>
 
       {/* ── Embed iframe (Pornhub etc) — full-screen, outside pointer-events:none div ── */}
-      {isEmbed && postData && (
+      {isEmbed && postData && embedSrcRef.current && (
         <iframe
           key={postData.id}
-          src={postData.file_url || postData.cdn_url}
+          src={embedSrcRef.current}
           frameBorder="0"
           allowFullScreen
+          loading="lazy"
           scrolling="no"
           allow="autoplay; fullscreen"
           style={{

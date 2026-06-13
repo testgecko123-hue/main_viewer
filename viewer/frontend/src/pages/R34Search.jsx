@@ -147,8 +147,25 @@ export default function R34Search() {
   const [importStatus, setImportStatus] = useState(null)
   const [importing, setImporting] = useState(false)
   const [forceImport, setForceImport] = useState(false)
+  const [phRefreshing, setPhRefreshing] = useState(false)
+  const [phRefreshResult, setPhRefreshResult] = useState(null)
   const gridRef = useRef()
   const sentinelRef = useRef()
+
+  // ── Pornhub metadata refresh ─────────────────────────────────────────────────
+  async function refreshPhMetadata() {
+    setPhRefreshing(true)
+    setPhRefreshResult(null)
+    try {
+      const res  = await apiFetch('/api/pornhub/refresh', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Refresh failed')
+      setPhRefreshResult({ ok: true, msg: `Updated ${data.updated} of ${data.total} posts` })
+    } catch (e) {
+      setPhRefreshResult({ ok: false, msg: e.message || 'Refresh failed' })
+    }
+    setPhRefreshing(false)
+  }
 
   // ── Infinite-scroll sentinel ────────────────────────────────────────────────
   useEffect(() => {
@@ -331,6 +348,29 @@ export default function R34Search() {
           style={{ width: '100%', padding: '11px', fontSize: '0.82rem', letterSpacing: '0.08em' }}>
           SEARCH
         </button>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8,
+          borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--muted)', letterSpacing: '0.08em' }}>
+            PORNHUB METADATA
+          </div>
+          <div style={{ fontSize: '0.62rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+            Pulls current thumbnails and tags for all Pornhub posts from the official API.
+          </div>
+          <button className="btn-surface" onClick={refreshPhMetadata}
+            disabled={phRefreshing}
+            style={{ width: '100%', opacity: phRefreshing ? 0.6 : 1 }}>
+            {phRefreshing ? 'REFRESHING…' : '↻ REFRESH PH METADATA'}
+          </button>
+          {phRefreshResult && (
+            <div style={{
+              fontSize: '0.65rem',
+              color: phRefreshResult.ok ? 'var(--green)' : 'var(--red)',
+            }}>
+              {phRefreshResult.msg}
+            </div>
+          )}
+        </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8,
           borderTop: '1px solid var(--border)', paddingTop: 12 }}>

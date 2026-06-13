@@ -92,6 +92,18 @@ from refresh_embed_thumbs import refresh_embed_thumbs
 
 refresh_embed_thumbs() 
 
+app.route('/api/pornhub/refresh', methods=['POST'])
+def api_pornhub_refresh():
+    """
+    Trigger a full metadata refresh for all Pornhub posts.
+    Runs synchronously so the caller gets the result immediately.
+    """
+    from refresh_embed_thumbs import run_refresh_for_route
+    result = run_refresh_for_route()
+    if result.get('status') == 'already_running':
+        return jsonify({'error': 'Refresh already in progress'}), 409
+    return jsonify(result)
+
 
 
 def _request_is_https():
