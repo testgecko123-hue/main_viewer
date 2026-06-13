@@ -97,30 +97,92 @@ def _load_csv_cache() -> dict[str, str]:
 
 def _fetch_ph_metadata(viewkey: str) -> dict | None:
     try:
-        resp = requests.get(_PH_API, params={'id': viewkey}, headers=HEADERS, timeout=15)
+        resp = requests.get(
+            _PH_API,
+            params={'id': viewkey},
+            headers=HEADERS,
+            timeout=15,
+        )
         resp.raise_for_status()
+
         data = resp.json()
         video = data.get('video') or {}
         if not video:
             return None
 
-        # Try to find a non-expiring thumb from the API (pix-cdn77 with hash=)
-        # These still expire via validto= but last ~24hrs which is acceptable
-        thumb = ''
+        # ------------------------------------------------------------------
+        # Build candidate thumbnail list
+        # ------------------------------------------------------------------
+
+        candidates = []
+
+        # All thumbs first
         for t in (video.get('thumbs') or []):
-            src = t.get('src', '')
-            if 'pix-cdn77' in src:
-                thumb = src
-                break
-        if not thumb:
-            thumb = video.get('thumb') or video.get('default_thumb') or ''
+            src = t.get('src')
+            if src:
+                candidates.append(src)
+
+        # Then primary fields
+        if video.get('thumb'):
+            candidates.append(video['thumb'])
+
+        if video.get('default_thumb'):
+            candidates.append(video['default_thumb'])
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_candidates = []
+
+        for url in candidates:
+            if url not in seen:
+                seen.add(url)
+                unique_candidates.append(url)
+
+        # ------------------------------------------------------------------
+        # Find a working thumbnail
+        # ------------------------------------------------------------------
+
+        working_thumb = ''
+
+        for url in unique_candidates:
+            try:
+                # Some CDNs behave badly with HEAD, so use a lightweight GET
+                r = requests.get(
+                    url,
+                    headers=HEADERS,
+                    stream=True,
+                    timeout=8,
+                )
+
+                if r.status_code == 200:
+                    working_thumb = url
+                    r.close()
+                    break
+
+                r.close()
+
+            except Exception:
+                pass
+
+        # Fallback if everything fails
+        if not working_thumb:
+            working_thumb = (
+                video.get('default_thumb')
+                or video.get('thumb')
+                or ''
+            )
 
         tags = [
             t['tag_name'].lower().replace(' ', '_')
-            for t in (video.get('tags') or []) if t.get('tag_name')
+            for t in (video.get('tags') or [])
+            if t.get('tag_name')
         ]
 
-        return {'thumb': thumb, 'tags': tags, 'is_expiring': _is_expiring(thumb)}
+        return {
+            'thumb': working_thumb,
+            'tags': tags,
+            'is_expiring': _is_expiring(working_thumb),
+        }
 
     except Exception as exc:
         print(f'[ph-refresh] API error for viewkey {viewkey}: {exc}')
@@ -130,6 +192,7 @@ def _fetch_ph_metadata(viewkey: str) -> dict | None:
 # ── Tag upsert ────────────────────────────────────────────────────────────────
 
 def _upsert_tags(db, post_id: int, tag_names: list[str]):
+
     if not tag_names:
         return
     db.execute('DELETE FROM post_tags WHERE post_id = %s', (post_id,))
