@@ -87,12 +87,10 @@ SECRET_TOKEN = os.getenv('VIEWER_AUTH_TOKEN', 'Test123')
 COOKIE_NAME  = 'viewer_auth'
 
 
-# update pornhub thumbnails 
+# update pornhub thumbnails — trigger manually via POST /api/pornhub/refresh
 from refresh_embed_thumbs import refresh_embed_thumbs
 
-refresh_embed_thumbs() 
-
-app.route('/api/pornhub/refresh', methods=['POST'])
+@app.route('/api/pornhub/refresh', methods=['POST'])
 def api_pornhub_refresh():
     """
     Trigger a full metadata refresh for all Pornhub posts.
