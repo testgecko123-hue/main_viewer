@@ -103,6 +103,116 @@ def api_pornhub_refresh():
     return jsonify(result)
 
 
+@app.route('/api/pornhub/posts')
+def api_pornhub_posts():
+    """
+    Return all Pornhub posts (id, file_url, thumb_cdn) for the thumbnail picker.
+    """
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, file_url, thumb_cdn FROM posts WHERE source_type = 'pornhub' ORDER BY id"
+    ).fetchall()
+    db.close()
+    return jsonify({'posts': [dict(r) for r in rows]})
+
+
+@app.route('/api/pornhub/thumbnails/<int:post_id>')
+def api_pornhub_thumbnails(post_id):
+    """
+    Return all candidate thumbnail URLs for a single Pornhub post by fetching
+    the PH webmasters API. Also returns the post's current thumb_cdn so the
+    frontend can mark which one is already chosen.
+    """
+    import re as _re2
+    db = get_db()
+    row = db.execute(
+        "SELECT id, file_url, thumb_cdn FROM posts WHERE id = %s AND source_type = 'pornhub'",
+        (post_id,)
+    ).fetchone()
+    db.close()
+
+    if not row:
+        return jsonify({'error': 'post not found'}), 404
+
+    embed_url = row['file_url'] or ''
+    current_thumb = row['thumb_cdn'] or ''
+
+    viewkey_match = _re2.search(r'pornhub\.com/embed/([a-zA-Z0-9]+)', embed_url, _re2.I)
+    if not viewkey_match:
+        return jsonify({'candidates': [], 'current_thumb': current_thumb})
+
+    viewkey = viewkey_match.group(1)
+
+    try:
+        resp = requests.get(
+            'https://www.pornhub.com/webmasters/video_by_id',
+            params={'id': viewkey},
+            headers=HEADERS,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        video = data.get('video') or {}
+    except Exception as e:
+        return jsonify({'error': f'PH API error: {e}', 'candidates': [], 'current_thumb': current_thumb}), 502
+
+    candidates = []
+    seen = set()
+
+    # thumbs array first (most variety)
+    for t in (video.get('thumbs') or []):
+        src = t.get('src', '')
+        if src and src not in seen:
+            seen.add(src)
+            candidates.append(src)
+
+    # then primary fields
+    for field in ('thumb', 'default_thumb'):
+        src = video.get(field, '')
+        if src and src not in seen:
+            seen.add(src)
+            candidates.append(src)
+
+    return jsonify({
+        'post_id': post_id,
+        'viewkey': viewkey,
+        'current_thumb': current_thumb,
+        'candidates': candidates,
+    })
+
+
+@app.route('/api/pornhub/set-thumb', methods=['POST'])
+def api_pornhub_set_thumb():
+    """
+    Persist the user-chosen thumbnail for a Pornhub post.
+    Body: { post_id: int, thumb_url: str }
+    """
+    payload = request.get_json() or {}
+    post_id = payload.get('post_id')
+    thumb_url = (payload.get('thumb_url') or '').strip()
+
+    if not post_id or not thumb_url:
+        return jsonify({'error': 'post_id and thumb_url required'}), 400
+
+    db = get_db()
+    try:
+        updated = db.execute(
+            "UPDATE posts SET thumb_cdn = %s WHERE id = %s AND source_type = 'pornhub' RETURNING id",
+            (thumb_url, post_id)
+        ).fetchone()
+        if not updated:
+            db.rollback()
+            db.close()
+            return jsonify({'error': 'post not found'}), 404
+        db.commit()
+        db.close()
+        return jsonify({'status': 'ok', 'post_id': post_id, 'thumb_cdn': thumb_url})
+    except Exception as e:
+        db.rollback()
+        db.close()
+        return jsonify({'error': str(e)}), 500
+
+
 
 def _request_is_https():
     return request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https'

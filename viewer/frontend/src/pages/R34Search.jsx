@@ -4,6 +4,323 @@ import useIsMobile from '../hooks/useIsMobile.js'
 import { gridCols, GRID } from '../config/gridConfig.js'
 import { apiFetch } from '../utils/api.js'
 
+// ── PH Thumbnail Picker overlay ───────────────────────────────────────────────
+
+function PhThumbPicker({ onClose }) {
+  const [posts, setPosts]           = useState([])     // all PH posts
+  const [idx, setIdx]               = useState(0)      // current post index
+  const [candidates, setCandidates] = useState([])     // thumb URLs for current post
+  const [currentThumb, setCurrentThumb] = useState('') // what's stored right now
+  const [loading, setLoading]       = useState(false)
+  const [saving, setSaving]         = useState(false)
+  const [fetchErr, setFetchErr]     = useState(null)
+  const [saved, setSaved]           = useState({})     // postId -> chosen thumb (session memory)
+  const [loadingPosts, setLoadingPosts] = useState(true)
+  const [skipped, setSkipped]       = useState(new Set())
+
+  // Load all PH posts on mount
+  useEffect(() => {
+    setLoadingPosts(true)
+    apiFetch('/api/pornhub/posts')
+      .then(r => r.json())
+      .then(d => {
+        setPosts(d.posts || [])
+        setLoadingPosts(false)
+      })
+      .catch(() => setLoadingPosts(false))
+  }, [])
+
+  // Load thumbnails whenever idx changes
+  useEffect(() => {
+    if (!posts.length || idx >= posts.length) return
+    const post = posts[idx]
+    setLoading(true)
+    setFetchErr(null)
+    setCandidates([])
+    apiFetch(`/api/pornhub/thumbnails/${post.id}`)
+      .then(r => r.json())
+      .then(d => {
+        setCandidates(d.candidates || [])
+        setCurrentThumb(d.current_thumb || '')
+        setLoading(false)
+      })
+      .catch(e => {
+        setFetchErr('Failed to load thumbnails')
+        setLoading(false)
+      })
+  }, [idx, posts])
+
+  // Keyboard: Space = keep current and advance, Escape = close, arrows = navigate candidates
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault()
+        skipPost()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [idx, posts])
+
+  function skipPost() {
+    setSkipped(prev => new Set(prev).add(posts[idx]?.id))
+    advance()
+  }
+
+  function advance() {
+    setIdx(i => i + 1)
+  }
+
+  async function chooseThumb(url) {
+    const post = posts[idx]
+    setSaving(true)
+    try {
+      const res = await apiFetch('/api/pornhub/set-thumb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_id: post.id, thumb_url: url }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Save failed')
+      setSaved(prev => ({ ...prev, [post.id]: url }))
+      advance()
+    } catch (e) {
+      setFetchErr(e.message || 'Failed to save')
+    }
+    setSaving(false)
+  }
+
+  const post = posts[idx]
+  const done = idx >= posts.length && posts.length > 0
+  const totalDone = Object.keys(saved).length + skipped.size
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.95)',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 16,
+        padding: '14px 20px',
+        borderBottom: '1px solid var(--border)',
+        flexShrink: 0,
+      }}>
+        <div style={{ fontFamily: 'var(--font-display)', color: 'var(--accent)', fontSize: '0.85rem', letterSpacing: '-0.01em' }}>
+          PH THUMBNAIL PICKER
+        </div>
+        {!loadingPosts && posts.length > 0 && (
+          <div style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>
+            {idx + 1} / {posts.length} posts · {totalDone} done
+          </div>
+        )}
+        <div style={{ flex: 1 }} />
+        <div style={{ fontSize: '0.6rem', color: 'var(--muted)' }}>
+          SPACE = keep current · ESC = close
+        </div>
+        <button className="btn-ghost" onClick={onClose}
+          style={{ padding: '4px 10px', fontSize: '0.8rem' }}>×</button>
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        {loadingPosts && (
+          <div style={{ color: 'var(--muted)', fontSize: '0.75rem', textAlign: 'center', marginTop: 60 }}>
+            Loading posts…
+          </div>
+        )}
+
+        {done && (
+          <div style={{ textAlign: 'center', marginTop: 80, color: 'var(--muted)', fontSize: '0.8rem' }}>
+            <div style={{ fontSize: '2rem', marginBottom: 12 }}>✓</div>
+            <div>All {posts.length} posts reviewed.</div>
+            <div style={{ marginTop: 6, fontSize: '0.65rem' }}>
+              {Object.keys(saved).length} thumbnails changed · {skipped.size} kept as-is
+            </div>
+            <button className="btn-ghost" onClick={onClose} style={{ marginTop: 20 }}>CLOSE</button>
+          </div>
+        )}
+
+        {!loadingPosts && !done && post && (
+          <>
+            {/* Post info row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>
+                Post <span style={{ color: 'var(--text)' }}>#{post.id}</span>
+              </div>
+              {saved[post.id] && (
+                <div style={{ fontSize: '0.6rem', color: 'var(--green)', background: '#14532d33',
+                  border: '1px solid #22c55e55', borderRadius: 3, padding: '2px 6px' }}>
+                  ✓ thumb changed this session
+                </div>
+              )}
+              {fetchErr && (
+                <div style={{ fontSize: '0.63rem', color: 'var(--red)' }}>{fetchErr}</div>
+              )}
+              <div style={{ flex: 1 }} />
+              <button className="btn-ghost" onClick={skipPost}
+                style={{ fontSize: '0.68rem', padding: '5px 12px' }}>
+                KEEP CURRENT [SPACE]
+              </button>
+            </div>
+
+            {loading && (
+              <div style={{ color: 'var(--muted)', fontSize: '0.72rem', marginTop: 20 }}>
+                Loading thumbnails…
+              </div>
+            )}
+
+            {!loading && (
+              <>
+                {/* Current thumb */}
+                {currentThumb && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--muted)', letterSpacing: '0.08em', marginBottom: 8 }}>
+                      CURRENT THUMBNAIL
+                    </div>
+                    <div style={{
+                      display: 'inline-block', position: 'relative',
+                      border: '2px solid var(--accent)',
+                      borderRadius: 4, overflow: 'hidden', cursor: 'pointer',
+                    }}
+                      onClick={() => chooseThumb(currentThumb)}
+                    >
+                      <img
+                        src={currentThumb}
+                        alt="current"
+                        style={{ display: 'block', height: 140, width: 'auto', objectFit: 'cover' }}
+                        onError={e => { e.target.style.opacity = '0.2' }}
+                      />
+                      <div style={{
+                        position: 'absolute', inset: 0,
+                        background: 'rgba(0,0,0,0)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }} />
+                    </div>
+                    <div style={{ fontSize: '0.58rem', color: 'var(--muted)', marginTop: 4 }}>
+                      click to re-confirm · or press SPACE to skip
+                    </div>
+                  </div>
+                )}
+
+                {/* All candidates grid */}
+                {candidates.length > 0 ? (
+                  <>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--muted)', letterSpacing: '0.08em', marginBottom: 10 }}>
+                      ALL CANDIDATES ({candidates.length}) — click to choose
+                    </div>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                      gap: 8,
+                    }}>
+                      {candidates.map((url, i) => {
+                        const isCurrent = url === currentThumb
+                        const isChosen  = saved[post.id] === url
+                        return (
+                          <div
+                            key={i}
+                            onClick={() => !saving && chooseThumb(url)}
+                            style={{
+                              position: 'relative',
+                              border: `2px solid ${isCurrent ? 'var(--accent)' : isChosen ? 'var(--green)' : 'var(--border)'}`,
+                              borderRadius: 4, overflow: 'hidden',
+                              cursor: saving ? 'wait' : 'pointer',
+                              aspectRatio: '16/9',
+                              background: 'var(--surface2)',
+                              transition: 'border-color 0.1s, transform 0.1s',
+                            }}
+                            onMouseEnter={e => { if (!saving) e.currentTarget.style.transform = 'scale(1.02)' }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
+                          >
+                            <img
+                              src={url}
+                              alt={`thumb ${i + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                              onError={e => {
+                                e.target.style.display = 'none'
+                                e.target.parentElement.style.opacity = '0.25'
+                              }}
+                            />
+                            {/* Index label */}
+                            <div style={{
+                              position: 'absolute', bottom: 3, right: 4,
+                              background: 'rgba(0,0,0,0.65)', borderRadius: 2,
+                              padding: '1px 5px', fontSize: '0.55rem', color: '#ccc',
+                            }}>{i + 1}</div>
+                            {isCurrent && (
+                              <div style={{
+                                position: 'absolute', top: 3, left: 3,
+                                background: 'var(--accent)', borderRadius: 2,
+                                padding: '1px 5px', fontSize: '0.55rem', color: '#000', fontWeight: 700,
+                              }}>CURRENT</div>
+                            )}
+                            {saving && (
+                              <div style={{
+                                position: 'absolute', inset: 0,
+                                background: 'rgba(0,0,0,0.5)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '0.65rem', color: 'var(--muted)',
+                              }}>saving…</div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ color: 'var(--muted)', fontSize: '0.7rem', marginTop: 20 }}>
+                    No candidates returned from the PH API for this post.
+                    <br />
+                    <button className="btn-ghost" onClick={skipPost}
+                      style={{ marginTop: 10, fontSize: '0.65rem' }}>
+                      SKIP →
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Footer nav */}
+      {!loadingPosts && !done && posts.length > 0 && (
+        <div style={{
+          borderTop: '1px solid var(--border)',
+          padding: '10px 20px',
+          display: 'flex', alignItems: 'center', gap: 12,
+          flexShrink: 0,
+        }}>
+          <button className="btn-ghost"
+            disabled={idx === 0}
+            onClick={() => setIdx(i => Math.max(0, i - 1))}
+            style={{ fontSize: '0.68rem', opacity: idx === 0 ? 0.35 : 1 }}>
+            ← PREV
+          </button>
+          {/* Progress bar */}
+          <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 2 }}>
+            <div style={{
+              height: '100%', borderRadius: 2,
+              background: 'var(--accent)',
+              width: `${posts.length ? (idx / posts.length) * 100 : 0}%`,
+              transition: 'width 0.2s',
+            }} />
+          </div>
+          <button className="btn-ghost"
+            disabled={idx >= posts.length - 1}
+            onClick={() => setIdx(i => Math.min(posts.length - 1, i + 1))}
+            style={{ fontSize: '0.68rem', opacity: idx >= posts.length - 1 ? 0.35 : 1 }}>
+            NEXT →
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Tiny R34 thumbnail card ───────────────────────────────────────────────────
 
 function R34Thumb({ post, onSelect, isSelected, onSave, saving }) {
@@ -149,6 +466,7 @@ export default function R34Search() {
   const [forceImport, setForceImport] = useState(false)
   const [phRefreshing, setPhRefreshing] = useState(false)
   const [phRefreshResult, setPhRefreshResult] = useState(null)
+  const [phPickerOpen, setPhPickerOpen] = useState(false)
   const gridRef = useRef()
   const sentinelRef = useRef()
 
@@ -294,6 +612,8 @@ export default function R34Search() {
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
+    <>
+    {phPickerOpen && <PhThumbPicker onClose={() => setPhPickerOpen(false)} />}
     <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: 'calc(100vh - var(--nav-h))' }}>
 
       {/* ── Left sidebar ───────────────────────────────────────────────────── */}
@@ -357,11 +677,18 @@ export default function R34Search() {
           <div style={{ fontSize: '0.62rem', color: 'var(--muted)', lineHeight: 1.5 }}>
             Pulls current thumbnails and tags for all Pornhub posts from the official API.
           </div>
-          <button className="btn-surface" onClick={refreshPhMetadata}
-            disabled={phRefreshing}
-            style={{ width: '100%', opacity: phRefreshing ? 0.6 : 1 }}>
-            {phRefreshing ? 'REFRESHING…' : '↻ REFRESH PH METADATA'}
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn-surface" onClick={refreshPhMetadata}
+              disabled={phRefreshing}
+              style={{ flex: 1, opacity: phRefreshing ? 0.6 : 1 }}>
+              {phRefreshing ? 'REFRESHING…' : '↻ REFRESH'}
+            </button>
+            <button className="btn-surface" onClick={() => setPhPickerOpen(true)}
+              title="Pick thumbnails for each PH post"
+              style={{ flexShrink: 0, padding: '8px 12px', fontSize: '0.72rem' }}>
+              🖼 PICK
+            </button>
+          </div>
           {phRefreshResult && (
             <div style={{
               fontSize: '0.65rem',
@@ -647,5 +974,6 @@ export default function R34Search() {
         </div>
       )}
     </div>
+  </>
   )
 }
