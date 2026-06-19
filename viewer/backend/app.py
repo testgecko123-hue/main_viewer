@@ -1954,9 +1954,9 @@ def api_mega_feed():
 
     db = get_db()
     try:
-        cond  = "" if status == "all" else "AND status = %s"
-        args  = [status] if status != "all" else []
-        rows  = db.execute(
+        cond      = "" if status == "all" else "AND status = %s"
+        args      = (status,) if status != "all" else ()
+        rows      = db.execute(
             f"""
             SELECT e.*, s.label as sub_label
             FROM ext_feed_posts e
@@ -1968,14 +1968,15 @@ def api_mega_feed():
             """,
             (*args, limit, offset),
         ).fetchall()
-        total = db.execute(
-            f"SELECT COUNT(*) FROM ext_feed_posts WHERE source_kind='mega' {cond}",
+        count_row = db.execute(
+            f"SELECT COUNT(*) AS n FROM ext_feed_posts WHERE source_kind='mega' {cond}",
             args,
-        ).fetchone()[0]
+        ).fetchone()
+        total = count_row["n"] if count_row else 0
         posts = []
         for r in rows:
             d = dict(r)
-            d["tags"] = json.loads(d.get("tags") or "[]")
+            d["tags"]        = json.loads(d.get("tags") or "[]")
             d["source_meta"] = json.loads(d.get("source_meta") or "{}")
             posts.append(d)
         return jsonify({"posts": posts, "total": total, "offset": offset})
