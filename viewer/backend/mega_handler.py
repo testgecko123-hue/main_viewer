@@ -58,49 +58,58 @@ def _infer_media_type(name: str) -> str:
 
 def scrape_mega_folder(mega_url: str) -> list[dict]:
     """
-    Given a MEGA folder link (https://mega.nz/folder/XXXX#YYYY or
-    https://mega.nz/#F!XXXX!YYYY), return a list of file dicts:
-      { id, name, size, media_type, mega_url, thumbnail_url (None) }
+    List all files in a public MEGA folder link, with real decrypted filenames.
 
-    This only lists files — no download, no key decryption beyond
-    confirming the node exists.
+    Tries in order:
+      1. mega.py  — decrypts filenames properly using the key in the URL
+      2. yt-dlp   — fallback, also handles decryption via subprocess
+
+    Returns list of:
+      { id, name, size, media_type, mega_url, source_url, thumbnail_url }
     """
-    # Parse folder-handle and key
-    m = re.search(
-        r"mega\.nz/(?:folder/|#F!)([A-Za-z0-9_-]+)[#!]([A-Za-z0-9_-]+)",
-        mega_url,
-    )
+    # Normalise old-style links (#F!handle!key) to new style (folder/handle#key)
+    old = re.match(r"https?://mega\.nz/#F!([A-Za-z0-9_-]+)!([A-Za-z0-9_-]+)", mega_url)
+    if old:
+        mega_url = f"https://mega.nz/folder/{old.group(1)}#{old.group(2)}"
+
+    m = re.search(r"mega\.nz/folder/([A-Za-z0-9_-]+)#([A-Za-z0-9_-]+)", mega_url)
     if not m:
-        raise ValueError(f"Cannot parse MEGA folder URL: {mega_url}")
+        raise ValueError(
+            "Could not parse MEGA folder URL. "
+            "Expected format: https://mega.nz/folder/HANDLE#KEY"
+        )
 
     folder_handle = m.group(1)
-    # folder_key    = m.group(2)   # would be used for decryption
 
-    # Fetch folder tree
+    # Method 1: mega.py
     try:
-        res = _mega_api_call([{"a": "f", "c": 1, "r": 1}], n=folder_handle)
+        return _scrape_via_megapy(mega_url, folder_handle)
+    except ImportError:
+        logger.warning("mega.py not installed, falling back to yt-dlp")
     except Exception as e:
-        raise RuntimeError(f"MEGA API error: {e}") from e
+        logger.warning("mega.py scrape failed (%s), falling back to yt-dlp", e)
 
-    if isinstance(res, int):          # MEGA returns a negative int on error
-        raise RuntimeError(f"MEGA API returned error code {res}")
+    # Method 2: yt-dlp fallback
+    return _scrape_via_ytdlp(mega_url, folder_handle)
 
-    nodes = res[0].get("f", []) if res else []
+
+def _scrape_via_megapy(mega_url: str, folder_handle: str) -> list[dict]:
+    """Use mega.py to list folder contents with decrypted names."""
+    from mega import Mega
+
+    mg = Mega()
+    folder_info = mg.get_public_files(mega_url)
 
     files = []
-    for node in nodes:
-        if node.get("t") != 0:        # t=0 is a file, t=1 is a folder
+    for handle, info in folder_info.items():
+        if info.get("t") != 0:
             continue
-        attr = node.get("a", "")      # encrypted filename — we can't decode
-        name = node.get("n") or f"file_{node['h']}"   # 'n' sometimes present
-        size = node.get("s", 0)
-        file_handle = node["h"]
-
-        # Build the direct file link (user will need the folder key in-app)
-        file_url = f"https://mega.nz/folder/{folder_handle}/file/{file_handle}"
-
+        attrs = info.get("a") or {}
+        name  = attrs.get("n") or f"file_{handle}"
+        size  = info.get("s", 0)
+        file_url = f"https://mega.nz/folder/{folder_handle}/file/{handle}"
         files.append({
-            "id":            file_handle,
+            "id":            handle,
             "name":          name,
             "size":          size,
             "media_type":    _infer_media_type(name),
@@ -109,6 +118,48 @@ def scrape_mega_folder(mega_url: str) -> list[dict]:
             "thumbnail_url": None,
         })
 
+    logger.info("mega.py listed %d files from %s", len(files), mega_url)
+    return files
+
+
+def _scrape_via_ytdlp(mega_url: str, folder_handle: str) -> list[dict]:
+    """Use yt-dlp --flat-playlist to list folder contents."""
+    import subprocess, json as _json
+
+    result = subprocess.run(
+        ["yt-dlp", "--flat-playlist", "--no-warnings", "-J", mega_url],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"yt-dlp listing failed (rc={result.returncode}): {result.stderr[:400]}"
+        )
+
+    try:
+        data = _json.loads(result.stdout)
+    except Exception as e:
+        raise RuntimeError(f"yt-dlp returned invalid JSON: {e}") from e
+
+    entries = data.get("entries") or []
+    files   = []
+
+    for entry in entries:
+        handle   = entry.get("id") or entry.get("url", "").split("/")[-1]
+        name     = entry.get("title") or entry.get("filename") or f"file_{handle}"
+        size     = entry.get("filesize") or entry.get("filesize_approx") or 0
+        file_url = entry.get("url") or f"https://mega.nz/folder/{folder_handle}/file/{handle}"
+        files.append({
+            "id":            handle,
+            "name":          name,
+            "size":          size,
+            "media_type":    _infer_media_type(name),
+            "mega_url":      file_url,
+            "source_url":    mega_url,
+            "thumbnail_url": None,
+        })
+
+    logger.info("yt-dlp listed %d files from %s", len(files), mega_url)
     return files
 
 
