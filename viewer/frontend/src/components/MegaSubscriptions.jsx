@@ -4,11 +4,16 @@
  * Panel that manages MEGA.nz folder subscriptions, displays their scraped
  * file feed, lets the user pick items, and triggers download→re-upload to
  * the storage network.
+ *
+ * UX:
+ *  - Left-click a card  → open detail drawer (info + preview + link)
+ *  - Middle-click a card → toggle selection for batch upload
+ *  - Checkbox in corner  → also toggles selection
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { apiFetch } from '../utils/api.js'
-import { postThumbUrl, parseSourceMeta, EXTERNAL_IMG_PROPS } from '../utils/mediaUtils.js'
+import { parseSourceMeta } from '../utils/mediaUtils.js'
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -20,63 +25,45 @@ function fmtBytes(b) {
   return `${(b / 1024 ** 3).toFixed(2)} GB`
 }
 
-// ── LightboxModal (photo full-view) ──────────────────────────────────────
+function getExt(filename) {
+  if (!filename) return ''
+  const m = filename.match(/\.([a-zA-Z0-9]+)$/)
+  return m ? m[1].toLowerCase() : ''
+}
 
-function LightboxModal({ post, onClose }) {
-  const thumbUrl = postThumbUrl(post)
+// Given a post, find the best URL we can actually use for previewing
+function getBestPreviewUrl(post) {
   const meta = parseSourceMeta(post)
-  const imgUrl = post.cdn_url || post.file_url || thumbUrl
-
-  useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.92)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 16,
-      }}
-    >
-      <button
-        onClick={onClose}
-        style={{
-          position: 'absolute', top: 16, right: 16,
-          background: 'rgba(255,255,255,0.1)', border: 'none',
-          borderRadius: '50%', width: 40, height: 40,
-          color: '#fff', fontSize: 20, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}
-      >✕</button>
-
-      <div onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-        <img
-          src={imgUrl}
-          alt={post.title || 'image'}
-          {...EXTERNAL_IMG_PROPS}
-          style={{ maxWidth: '90vw', maxHeight: '82vh', objectFit: 'contain', borderRadius: 8 }}
-          onError={e => { e.target.style.display = 'none' }}
-        />
-        {post.title && (
-          <div style={{ fontSize: 13, color: '#ccc', textAlign: 'center', maxWidth: 600 }}>
-            {post.title}
-          </div>
-        )}
-      </div>
-    </div>
+    post.preview_url ||
+    meta.thumbnail_url ||
+    meta.preview_url ||
+    null
   )
 }
 
-// ── VideoModal ───────────────────────────────────────────────────────────
-
-function VideoModal({ post, onClose }) {
+function getBestFileUrl(post) {
   const meta = parseSourceMeta(post)
-  const videoUrl = post.cdn_url || post.file_url || meta.source_url || ''
+  return (
+    post.file_url ||
+    meta.source_url ||
+    meta.mega_url ||
+    post.source_url ||
+    null
+  )
+}
+
+// ── PostDetailDrawer ──────────────────────────────────────────────────────
+
+function PostDetailDrawer({ post, selected, onToggleSelect, onClose, onStatusChange }) {
+  const meta       = parseSourceMeta(post)
+  const isVideo    = post.media_type === 'video'
+  const isImage    = post.media_type === 'image'
+  const previewUrl = getBestPreviewUrl(post)
+  const fileUrl    = getBestFileUrl(post)
+  const size       = meta.size || 0
+  const ext        = getExt(post.title || post.source_key || '')
+  const [imgFailed, setImgFailed] = useState(false)
 
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose() }
@@ -84,46 +71,251 @@ function VideoModal({ post, onClose }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const typeColor = isVideo ? '#d9534f' : isImage ? '#4a90d9' : '#888'
+  const typeLabel = isVideo ? '▶ VIDEO' : isImage ? '🖼 PHOTO' : '📄 FILE'
+
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.95)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 16,
-      }}
-    >
-      <button
+    <>
+      {/* Backdrop */}
+      <div
         onClick={onClose}
         style={{
-          position: 'absolute', top: 16, right: 16,
-          background: 'rgba(255,255,255,0.1)', border: 'none',
-          borderRadius: '50%', width: 40, height: 40,
-          color: '#fff', fontSize: 20, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'fixed', inset: 0, zIndex: 900,
+          background: 'rgba(0,0,0,0.5)',
         }}
-      >✕</button>
+      />
 
-      <div onClick={e => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-        {videoUrl ? (
-          <video
-            src={videoUrl}
-            controls
-            autoPlay
-            style={{ maxWidth: '92vw', maxHeight: '84vh', borderRadius: 8, background: '#000' }}
-          />
-        ) : (
-          <div style={{ color: '#aaa', fontSize: 14, padding: 40 }}>
-            No video URL available yet. Download and store the file first to play it.
+      {/* Drawer */}
+      <div style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0,
+        width: 'min(460px, 95vw)',
+        zIndex: 901,
+        background: 'var(--surface-0, #141414)',
+        borderLeft: '1px solid #2a2a2a',
+        display: 'flex', flexDirection: 'column',
+        overflowY: 'auto',
+        boxShadow: '-8px 0 40px rgba(0,0,0,0.6)',
+      }}>
+
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '14px 16px', borderBottom: '1px solid #222',
+          position: 'sticky', top: 0, background: 'var(--surface-0, #141414)', zIndex: 1,
+        }}>
+          <span style={{
+            background: typeColor, color: '#fff',
+            fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+          }}>{typeLabel}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: 'var(--text-primary, #eee)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {post.title || post.source_key || `Post #${post.id}`}
+            </div>
           </div>
-        )}
-        {post.title && (
-          <div style={{ fontSize: 13, color: '#ccc', textAlign: 'center', maxWidth: 600 }}>
-            {post.title}
-          </div>
-        )}
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', color: '#888',
+            fontSize: 20, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+            lineHeight: 1,
+          }}>✕</button>
+        </div>
+
+        {/* Preview area */}
+        <div style={{
+          background: '#0a0a0a',
+          minHeight: 200,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
+        }}>
+          {isVideo && fileUrl ? (
+            <video
+              src={fileUrl}
+              controls
+              style={{ maxWidth: '100%', maxHeight: 340, display: 'block' }}
+            />
+          ) : isVideo ? (
+            <div style={{ padding: 32, textAlign: 'center' }}>
+              <div style={{ fontSize: 48, marginBottom: 8 }}>🎬</div>
+              <div style={{ fontSize: 12, color: '#666' }}>
+                Video not yet downloaded.<br />Select and store to get the file.
+              </div>
+            </div>
+          ) : isImage && previewUrl && !imgFailed ? (
+            <img
+              src={previewUrl}
+              alt={post.title || ''}
+              referrerPolicy="no-referrer"
+              onError={() => setImgFailed(true)}
+              style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain', display: 'block' }}
+            />
+          ) : isImage && fileUrl && !imgFailed ? (
+            <img
+              src={fileUrl}
+              alt={post.title || ''}
+              referrerPolicy="no-referrer"
+              onError={() => setImgFailed(true)}
+              style={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain', display: 'block' }}
+            />
+          ) : (
+            <div style={{ padding: 32, textAlign: 'center' }}>
+              <div style={{ fontSize: 48, marginBottom: 8 }}>
+                {isImage ? '🖼️' : isVideo ? '🎬' : '📄'}
+              </div>
+              <div style={{ fontSize: 12, color: '#666' }}>
+                {imgFailed
+                  ? 'Preview unavailable (file may require MEGA authentication)'
+                  : 'No preview available'}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Info rows */}
+        <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+          {/* File link */}
+          {fileUrl && (
+            <InfoRow label="File link">
+              <a
+                href={fileUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: '#4a90d9', fontSize: 12, wordBreak: 'break-all' }}
+              >
+                {fileUrl.length > 60 ? fileUrl.slice(0, 60) + '…' : fileUrl}
+              </a>
+            </InfoRow>
+          )}
+
+          {/* MEGA folder URL */}
+          {meta.mega_url && meta.mega_url !== fileUrl && (
+            <InfoRow label="MEGA folder">
+              <a
+                href={meta.mega_url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: '#d9534f', fontSize: 12, wordBreak: 'break-all' }}
+              >
+                {meta.mega_url.length > 60 ? meta.mega_url.slice(0, 60) + '…' : meta.mega_url}
+              </a>
+            </InfoRow>
+          )}
+
+          {/* File details */}
+          <InfoRow label="File type">
+            <span style={{ color: '#ccc', fontSize: 12 }}>
+              {ext ? ext.toUpperCase() : '—'}{' '}
+              <span style={{ color: '#666' }}>({post.media_type || 'unknown'})</span>
+            </span>
+          </InfoRow>
+
+          {size > 0 && (
+            <InfoRow label="File size">
+              <span style={{ color: '#ccc', fontSize: 12 }}>{fmtBytes(size)}</span>
+            </InfoRow>
+          )}
+
+          {post.sub_label && (
+            <InfoRow label="Subscription">
+              <span style={{ color: '#4a90d9', fontSize: 12 }}>{post.sub_label}</span>
+            </InfoRow>
+          )}
+
+          {post.post_date && (
+            <InfoRow label="Date">
+              <span style={{ color: '#ccc', fontSize: 12 }}>
+                {new Date(post.post_date).toLocaleString()}
+              </span>
+            </InfoRow>
+          )}
+
+          <InfoRow label="Status">
+            <span style={{
+              fontSize: 12, fontWeight: 600,
+              color: post.status === 'saved' ? '#3a7d44' : post.status === 'ignored' ? '#666' : '#ccc',
+            }}>
+              {post.status}
+            </span>
+          </InfoRow>
+
+          {post.source_key && (
+            <InfoRow label="Source key">
+              <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                {post.source_key}
+              </span>
+            </InfoRow>
+          )}
+
+          {/* Tags */}
+          {post.tags?.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: '#666', marginBottom: 5 }}>Tags</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {post.tags.map(tag => (
+                  <span key={tag} style={{
+                    fontSize: 10, padding: '2px 6px', borderRadius: 3,
+                    background: '#222', color: '#aaa',
+                  }}>{tag}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Raw meta (collapsed) */}
+          {Object.keys(meta).length > 0 && (
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ fontSize: 11, color: '#555', cursor: 'pointer' }}>Raw metadata</summary>
+              <pre style={{
+                fontSize: 10, color: '#555', marginTop: 6,
+                background: '#0d0d0d', padding: 8, borderRadius: 6,
+                overflow: 'auto', maxHeight: 200,
+              }}>
+                {JSON.stringify(meta, null, 2)}
+              </pre>
+            </details>
+          )}
+        </div>
+
+        {/* Action footer */}
+        <div style={{
+          marginTop: 'auto',
+          padding: '12px 16px',
+          borderTop: '1px solid #222',
+          display: 'flex', gap: 8, flexWrap: 'wrap',
+          background: 'var(--surface-0, #141414)',
+          position: 'sticky', bottom: 0,
+        }}>
+          <button
+            onClick={() => onToggleSelect(post.id)}
+            style={btnStyle(selected ? '#4a90d9' : '#2a2a2a', { flex: 1, border: '1px solid #444' })}
+          >
+            {selected ? '✓ Selected for upload' : '+ Add to upload queue'}
+          </button>
+          {['saved', 'ignored', 'unseen'].filter(s => s !== post.status).map(s => (
+            <button
+              key={s}
+              onClick={() => onStatusChange(post.id, s)}
+              style={btnStyle(
+                s === 'saved' ? '#3a7d44' : s === 'ignored' ? '#444' : '#333',
+                { fontSize: 11, padding: '6px 10px' }
+              )}
+            >
+              Mark {s}
+            </button>
+          ))}
+        </div>
       </div>
+    </>
+  )
+}
+
+function InfoRow({ label, children }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <span style={{ fontSize: 11, color: '#555', width: 90, flexShrink: 0, paddingTop: 1 }}>{label}</span>
+      <div style={{ flex: 1 }}>{children}</div>
     </div>
   )
 }
@@ -153,11 +345,9 @@ function StorageBar({ accounts }) {
               </span>
               <div style={{ flex: 1, height: 8, background: 'var(--surface-2, #333)', borderRadius: 4, overflow: 'hidden' }}>
                 <div style={{
-                  height: '100%',
-                  width: `${usedPct}%`,
+                  height: '100%', width: `${usedPct}%`,
                   background: isFull ? '#e05050' : acc.kind === 'mega' ? '#d9534f' : '#4a90d9',
-                  borderRadius: 4,
-                  transition: 'width 0.4s',
+                  borderRadius: 4, transition: 'width 0.4s',
                 }} />
               </div>
               <span style={{ fontSize: 11, color: 'var(--text-secondary, #aaa)', whiteSpace: 'nowrap', width: 80, textAlign: 'right' }}>
@@ -258,36 +448,30 @@ function SubscriptionRow({ sub, onDelete, onFetch, fetching }) {
 
 // ── FeedPostCard ──────────────────────────────────────────────────────────
 
-function FeedPostCard({ post, selected, onToggle, uploading, onOpenMedia }) {
-  const isVideo = post.media_type === 'video'
-  const isImage = post.media_type === 'image'
-  const size    = post.source_meta?.size || parseSourceMeta(post)?.size || 0
-  const thumbUrl = postThumbUrl(post)
-  const hasThumb = !!thumbUrl
-
+function FeedPostCard({ post, selected, onLeftClick, onMiddleClick, uploading }) {
+  const isVideo    = post.media_type === 'video'
+  const isImage    = post.media_type === 'image'
+  const size       = parseSourceMeta(post)?.size || 0
+  const ext        = getExt(post.title || post.source_key || '')
   const [hovered, setHovered] = useState(false)
-  const [imgError, setImgError] = useState(false)
 
-  const statusColor = {
-    unseen:  'transparent',
-    saved:   '#3a7d44',
-    ignored: '#555',
-    unsure:  '#7d6a2a',
-  }[post.status] || 'transparent'
+  const typeBadgeBg = isVideo ? '#d9534f' : isImage ? '#4a90d9' : '#555'
+  const typeLabel   = isVideo ? '▶ VIDEO' : isImage ? '🖼 PHOTO' : '📄 FILE'
 
-  // Type badge colors
-  const typeBadgeBg = isVideo ? 'rgba(220,80,60,0.88)' : isImage ? 'rgba(50,120,210,0.82)' : 'rgba(80,80,80,0.75)'
-  const typeLabel   = isVideo ? '▶ VIDEO' : isImage ? '🖼 PHOTO' : 'FILE'
+  const statusBadge = post.status !== 'unseen' ? post.status : null
+  const statusColor = { saved: '#3a7d44', ignored: '#555', unsure: '#7d6a2a' }[post.status]
 
-  function handleClick(e) {
-    // If clicking the open-media button, don't toggle selection
-    if (uploading) return
-    onToggle(post.id)
+  function handleMouseDown(e) {
+    // Middle click = toggle select
+    if (e.button === 1) {
+      e.preventDefault()
+      if (!uploading) onMiddleClick(post.id)
+    }
   }
 
-  function handleOpenMedia(e) {
-    e.stopPropagation()
-    onOpenMedia(post)
+  function handleClick(e) {
+    if (uploading) return
+    onLeftClick(post)
   }
 
   return (
@@ -295,144 +479,73 @@ function FeedPostCard({ post, selected, onToggle, uploading, onOpenMedia }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={handleClick}
+      onMouseDown={handleMouseDown}
       style={{
         position: 'relative',
         borderRadius: 10,
         overflow: 'hidden',
         cursor: uploading ? 'default' : 'pointer',
-        border: selected ? '2px solid #4a90d9' : hovered ? '2px solid #666' : '2px solid transparent',
+        border: selected
+          ? '2px solid #4a90d9'
+          : hovered ? '2px solid #444' : '2px solid transparent',
         background: 'var(--surface-1, #1a1a1a)',
-        transition: 'border-color 0.15s',
+        transition: 'border-color 0.12s',
         aspectRatio: '4/3',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        padding: 10,
+        userSelect: 'none',
       }}
     >
-      {/* Thumbnail or icon fallback */}
-      {hasThumb && !imgError ? (
-        <img
-          src={thumbUrl}
-          alt={post.title || ''}
-          {...EXTERNAL_IMG_PROPS}
-          onError={() => setImgError(true)}
-          style={{
-            width: '100%', height: '100%',
-            objectFit: 'cover',
-            display: 'block',
-            transition: 'transform 0.2s',
-            transform: hovered ? 'scale(1.04)' : 'scale(1)',
-          }}
-        />
-      ) : (
-        <div style={{
-          width: '100%', height: '100%',
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-          gap: 6, padding: 8,
-        }}>
-          <span style={{ fontSize: 36 }}>{isVideo ? '🎬' : isImage ? '🖼️' : '📄'}</span>
-          <div style={{
-            fontSize: 10, color: 'var(--text-primary, #ddd)',
-            overflow: 'hidden', textOverflow: 'ellipsis',
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            lineHeight: 1.3, textAlign: 'center',
-          }}>
-            {post.title || `file_${post.id}`}
-          </div>
-          {size > 0 && (
-            <div style={{ fontSize: 10, color: 'var(--text-secondary, #888)' }}>
-              {fmtBytes(size)}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Type icon */}
+      <div style={{ fontSize: 32 }}>
+        {isVideo ? '🎬' : isImage ? '🖼️' : '📄'}
+      </div>
 
-      {/* Dark gradient overlay on hover or when no thumb */}
-      {(hovered || !hasThumb || imgError) && hasThumb && !imgError && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.1) 60%, transparent 100%)',
-          pointerEvents: 'none',
-        }} />
-      )}
+      {/* Filename */}
+      <div style={{
+        fontSize: 10, color: 'var(--text-primary, #ddd)',
+        overflow: 'hidden', textOverflow: 'ellipsis',
+        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+        lineHeight: 1.35, textAlign: 'center', maxWidth: '100%',
+      }}>
+        {post.title || post.source_key || `file_${post.id}`}
+      </div>
+
+      {/* Ext + size */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {ext && (
+          <span style={{
+            fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+            background: typeBadgeBg, color: '#fff',
+          }}>{ext.toUpperCase()}</span>
+        )}
+        {size > 0 && (
+          <span style={{ fontSize: 9, color: '#666' }}>{fmtBytes(size)}</span>
+        )}
+      </div>
 
       {/* Type badge (top-left) */}
       <div style={{
         position: 'absolute', top: 6, left: 6,
         background: typeBadgeBg,
         borderRadius: 4, fontSize: 9, padding: '2px 5px',
-        color: '#fff', fontWeight: 700, letterSpacing: '0.04em',
-        backdropFilter: 'blur(4px)',
+        color: '#fff', fontWeight: 700,
       }}>
         {typeLabel}
       </div>
 
       {/* Status badge */}
-      {statusColor !== 'transparent' && (
+      {statusBadge && (
         <div style={{
-          position: 'absolute', top: 6, left: isVideo || isImage ? 72 : 6,
+          position: 'absolute', top: 6, right: selected ? 32 : 6,
           background: statusColor, borderRadius: 4,
           fontSize: 9, padding: '2px 5px', color: '#fff', fontWeight: 700,
         }}>
-          {post.status.toUpperCase()}
-        </div>
-      )}
-
-      {/* Video play button overlay (center) */}
-      {isVideo && (
-        <button
-          onClick={handleOpenMedia}
-          style={{
-            position: 'absolute',
-            top: '50%', left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: 44, height: 44, borderRadius: '50%',
-            background: hovered ? 'rgba(220,80,60,0.92)' : 'rgba(0,0,0,0.55)',
-            border: '2px solid rgba(255,255,255,0.7)',
-            color: '#fff', fontSize: 18,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-            transition: 'background 0.15s, transform 0.15s',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
-          }}
-          title="Play video"
-        >▶</button>
-      )}
-
-      {/* Photo expand button (shows on hover) */}
-      {isImage && hovered && (
-        <button
-          onClick={handleOpenMedia}
-          style={{
-            position: 'absolute',
-            top: '50%', left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: 40, height: 40, borderRadius: '50%',
-            background: 'rgba(74,144,217,0.88)',
-            border: '2px solid rgba(255,255,255,0.6)',
-            color: '#fff', fontSize: 16,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
-          }}
-          title="View full image"
-        >⤢</button>
-      )}
-
-      {/* Bottom info bar (visible on hover when there's a thumb) */}
-      {hasThumb && !imgError && hovered && (
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          padding: '6px 8px',
-          pointerEvents: 'none',
-        }}>
-          <div style={{
-            fontSize: 10, color: '#eee',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {post.title || `file_${post.id}`}
-          </div>
-          {size > 0 && (
-            <div style={{ fontSize: 9, color: '#aaa' }}>{fmtBytes(size)}</div>
-          )}
+          {statusBadge.toUpperCase()}
         </div>
       )}
 
@@ -440,18 +553,27 @@ function FeedPostCard({ post, selected, onToggle, uploading, onOpenMedia }) {
       {selected && (
         <div style={{
           position: 'absolute', top: 6, right: 6,
-          width: 22, height: 22, borderRadius: '50%',
+          width: 20, height: 20, borderRadius: '50%',
           background: '#4a90d9', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 13, color: '#fff', fontWeight: 700,
-          boxShadow: '0 1px 6px rgba(0,0,0,0.4)',
+          fontSize: 12, color: '#fff', fontWeight: 700,
         }}>✓</div>
       )}
 
-      {/* Sub label */}
-      {post.sub_label && !hovered && (
+      {/* Middle-click hint on hover */}
+      {hovered && !selected && (
         <div style={{
-          position: 'absolute', bottom: 4, right: 6,
-          fontSize: 9, color: '#4a90d9', fontWeight: 600,
+          position: 'absolute', bottom: 5, right: 6,
+          fontSize: 8, color: '#444',
+        }}>
+          mid-click to select
+        </div>
+      )}
+
+      {/* Sub label */}
+      {post.sub_label && (
+        <div style={{
+          position: 'absolute', bottom: 4, left: 6,
+          fontSize: 9, color: '#4a90d9',
         }}>
           {post.sub_label}
         </div>
@@ -486,12 +608,8 @@ function UploadProgress({ events }) {
                 → {ev.kind} #{ev.account} · <a href={ev.share_url} target="_blank" rel="noreferrer" style={{ color: '#4a90d9' }}>view</a>
               </div>
             )}
-            {ev.status === 'error' && (
-              <div style={{ fontSize: 10, color: '#e06060' }}>{ev.error}</div>
-            )}
-            {ev.status === 'downloading' && (
-              <div style={{ fontSize: 10, color: '#888' }}>downloading…</div>
-            )}
+            {ev.status === 'error' && <div style={{ fontSize: 10, color: '#e06060' }}>{ev.error}</div>}
+            {ev.status === 'downloading' && <div style={{ fontSize: 10, color: '#888' }}>downloading…</div>}
           </div>
         </div>
       ))}
@@ -513,7 +631,7 @@ export default function MegaSubscriptions() {
   const [statusFilter, setStatusFilter] = useState('unseen')
   const [offset, setOffset]         = useState(0)
   const [total, setTotal]           = useState(0)
-  const [mediaModal, setMediaModal] = useState(null) // { post, type: 'image'|'video' }
+  const [detailPost, setDetailPost] = useState(null)
   const LIMIT = 50
 
   useEffect(() => {
@@ -571,16 +689,11 @@ export default function MegaSubscriptions() {
     })
   }
 
-  function handleOpenMedia(post) {
-    setMediaModal({ post, type: post.media_type === 'video' ? 'video' : 'image' })
-  }
-
   async function handleStoreSelected() {
     if (selected.size === 0) return
     if (!confirm(`Download and store ${selected.size} file(s) to storage network?`)) return
     setUploading(true)
     setUploadEvents([])
-
     const postIds = [...selected]
     setSelected(new Set())
 
@@ -593,7 +706,6 @@ export default function MegaSubscriptions() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -612,7 +724,6 @@ export default function MegaSubscriptions() {
           } catch {}
         }
       }
-
       apiFetch('/api/storage/accounts').then(r => r.json()).then(setAccounts).catch(() => {})
       loadPosts(offset)
     } catch (e) {
@@ -628,30 +739,30 @@ export default function MegaSubscriptions() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     })
-    loadPosts(offset)
+    // Update in-place so the drawer reflects the new status immediately
+    setPosts(prev => prev.map(p => p.id === postId ? { ...p, status } : p))
+    if (detailPost?.id === postId) setDetailPost(prev => ({ ...prev, status }))
   }
 
-  const canStoreSelected = selected.size > 0 && !uploading
-
-  // Count videos vs images in current feed
   const videoCount = posts.filter(p => p.media_type === 'video').length
   const imageCount = posts.filter(p => p.media_type === 'image').length
 
   return (
     <div style={{ padding: '16px 0' }}>
 
-      {/* Modals */}
-      {mediaModal?.type === 'image' && (
-        <LightboxModal post={mediaModal.post} onClose={() => setMediaModal(null)} />
-      )}
-      {mediaModal?.type === 'video' && (
-        <VideoModal post={mediaModal.post} onClose={() => setMediaModal(null)} />
+      {/* Detail drawer */}
+      {detailPost && (
+        <PostDetailDrawer
+          post={detailPost}
+          selected={selected.has(detailPost.id)}
+          onToggleSelect={toggleSelect}
+          onClose={() => setDetailPost(null)}
+          onStatusChange={handleStatusChange}
+        />
       )}
 
-      {/* Storage network bars */}
       <StorageBar accounts={accounts} />
 
-      {/* Add subscription form */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: 'var(--text-primary, #eee)' }}>
           MEGA Subscriptions
@@ -659,7 +770,6 @@ export default function MegaSubscriptions() {
         <AddSubForm onAdded={handleSubAdded} />
       </div>
 
-      {/* Subscription list */}
       {subs.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           {subs.map(sub => (
@@ -674,7 +784,6 @@ export default function MegaSubscriptions() {
         </div>
       )}
 
-      {/* Upload progress */}
       <UploadProgress events={uploadEvents} />
 
       {/* Feed header */}
@@ -682,7 +791,6 @@ export default function MegaSubscriptions() {
         <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary, #eee)' }}>
           MEGA Feed
         </div>
-        {/* Filter tabs */}
         {['unseen', 'saved', 'ignored', 'all'].map(f => (
           <button
             key={f}
@@ -695,25 +803,27 @@ export default function MegaSubscriptions() {
             {f}
           </button>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: '#888' }}>
+
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: '#888', display: 'flex', alignItems: 'center', gap: 6 }}>
           {total} post{total !== 1 ? 's' : ''}
-          {(videoCount > 0 || imageCount > 0) && posts.length > 0 && (
-            <span style={{ marginLeft: 8 }}>
-              {videoCount > 0 && <span style={{ color: '#d9534f' }}>▶ {videoCount}</span>}
-              {videoCount > 0 && imageCount > 0 && <span style={{ color: '#555' }}> · </span>}
-              {imageCount > 0 && <span style={{ color: '#4a90d9' }}>🖼 {imageCount}</span>}
-            </span>
-          )}
+          {videoCount > 0 && <span style={{ color: '#d9534f', fontWeight: 600 }}>▶ {videoCount}</span>}
+          {imageCount > 0 && <span style={{ color: '#4a90d9', fontWeight: 600 }}>🖼 {imageCount}</span>}
         </span>
+
         {selected.size > 0 && (
           <button
             onClick={handleStoreSelected}
-            disabled={!canStoreSelected}
+            disabled={uploading}
             style={btnStyle('#3a7d44')}
           >
             ⬆ Store {selected.size} selected
           </button>
         )}
+      </div>
+
+      {/* Usage hint */}
+      <div style={{ fontSize: 11, color: '#444', marginBottom: 10 }}>
+        Click a card to view details · Middle-click to select for upload
       </div>
 
       {/* Grid */}
@@ -726,36 +836,18 @@ export default function MegaSubscriptions() {
       ) : (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))',
           gap: 10,
         }}>
           {posts.map(post => (
-            <div key={post.id} style={{ position: 'relative' }}>
-              <FeedPostCard
-                post={post}
-                selected={selected.has(post.id)}
-                onToggle={toggleSelect}
-                uploading={uploading}
-                onOpenMedia={handleOpenMedia}
-              />
-              {/* quick-status menu */}
-              <div style={{ display: 'flex', gap: 3, marginTop: 4, justifyContent: 'center' }}>
-                {['saved', 'ignored'].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => handleStatusChange(post.id, s)}
-                    style={{
-                      fontSize: 9, padding: '2px 5px', borderRadius: 4, border: 'none',
-                      cursor: 'pointer',
-                      background: post.status === s ? (s === 'saved' ? '#3a7d44' : '#555') : '#2a2a2a',
-                      color: '#aaa',
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <FeedPostCard
+              key={post.id}
+              post={post}
+              selected={selected.has(post.id)}
+              onLeftClick={setDetailPost}
+              onMiddleClick={toggleSelect}
+              uploading={uploading}
+            />
           ))}
         </div>
       )}
@@ -767,9 +859,7 @@ export default function MegaSubscriptions() {
             onClick={() => loadPosts(Math.max(0, offset - LIMIT))}
             disabled={offset === 0}
             style={btnStyle('#333', { padding: '6px 16px' })}
-          >
-            ← Prev
-          </button>
+          >← Prev</button>
           <span style={{ color: '#888', fontSize: 12, alignSelf: 'center' }}>
             {offset + 1}–{Math.min(offset + LIMIT, total)} of {total}
           </span>
@@ -777,9 +867,7 @@ export default function MegaSubscriptions() {
             onClick={() => loadPosts(offset + LIMIT)}
             disabled={offset + LIMIT >= total}
             style={btnStyle('#333', { padding: '6px 16px' })}
-          >
-            Next →
-          </button>
+          >Next →</button>
         </div>
       )}
     </div>
@@ -810,7 +898,6 @@ function btnStyle(bg, extra = {}) {
     fontWeight: 600,
     fontSize: 13,
     cursor: 'pointer',
-    opacity: 1,
     ...extra,
   }
 }

@@ -80,20 +80,21 @@ def scrape_mega_folder(mega_url: str) -> list[dict]:
         )
 
     folder_handle = m.group(1)
+    folder_key    = m.group(2)
 
     # Method 1: mega.py
     try:
-        return _scrape_via_megapy(mega_url, folder_handle)
+        return _scrape_via_megapy(mega_url, folder_handle, folder_key)
     except ImportError:
         logger.warning("mega.py not installed, falling back to yt-dlp")
     except Exception as e:
         logger.warning("mega.py scrape failed (%s), falling back to yt-dlp", e)
 
     # Method 2: yt-dlp fallback
-    return _scrape_via_ytdlp(mega_url, folder_handle)
+    return _scrape_via_ytdlp(mega_url, folder_handle, folder_key)
 
 
-def _scrape_via_megapy(mega_url: str, folder_handle: str) -> list[dict]:
+def _scrape_via_megapy(mega_url: str, folder_handle: str, folder_key: str) -> list[dict]:
     """Use mega.py to list folder contents with decrypted names."""
     from mega import Mega
 
@@ -107,7 +108,7 @@ def _scrape_via_megapy(mega_url: str, folder_handle: str) -> list[dict]:
         attrs = info.get("a") or {}
         name  = attrs.get("n") or f"file_{handle}"
         size  = info.get("s", 0)
-        file_url = f"https://mega.nz/folder/{folder_handle}/file/{handle}"
+        file_url = f"https://mega.nz/folder/{folder_handle}/file/{handle}#{folder_key}"
         files.append({
             "id":            handle,
             "name":          name,
@@ -122,7 +123,7 @@ def _scrape_via_megapy(mega_url: str, folder_handle: str) -> list[dict]:
     return files
 
 
-def _scrape_via_ytdlp(mega_url: str, folder_handle: str) -> list[dict]:
+def _scrape_via_ytdlp(mega_url: str, folder_handle: str, folder_key: str) -> list[dict]:
     """Use yt-dlp --flat-playlist to list folder contents."""
     import subprocess, json as _json
 
@@ -148,7 +149,7 @@ def _scrape_via_ytdlp(mega_url: str, folder_handle: str) -> list[dict]:
         handle   = entry.get("id") or entry.get("url", "").split("/")[-1]
         name     = entry.get("title") or entry.get("filename") or f"file_{handle}"
         size     = entry.get("filesize") or entry.get("filesize_approx") or 0
-        file_url = entry.get("url") or f"https://mega.nz/folder/{folder_handle}/file/{handle}"
+        file_url = f"https://mega.nz/folder/{folder_handle}/file/{handle}#{folder_key}"
         files.append({
             "id":            handle,
             "name":          name,
