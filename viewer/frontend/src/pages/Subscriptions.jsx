@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { gridCols, GRID } from '../config/gridConfig.js'
 import { apiFetch, apiEventSource } from '../utils/api.js'
 import useIsMobile from '../hooks/useIsMobile.js'
+import MegaSubscriptions from '../components/MegaSubscriptions.jsx'
 
 function loadStored(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback }
@@ -813,7 +814,7 @@ export default function Subscriptions({ selection, setSelection }) {
         <div style={{ borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           {/* Row 1 — tabs, equal width */}
           <div style={{ display: 'flex' }}>
-            {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE']].map(([t, label]) => (
+            {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE'],['mega','MEGA']].map(([t, label]) => (
               <button key={t} onClick={() => setTab(t)} style={{
                 flex: 1,
                 padding: '13px 4px',
@@ -855,7 +856,7 @@ export default function Subscriptions({ selection, setSelection }) {
           padding: '0 20px',
           display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
         }}>
-          {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE']].map(([t, label]) => (
+          {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE'],['mega','🔴 MEGA']].map(([t, label]) => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: '12px 16px',
               fontSize: '0.7rem',
@@ -1115,6 +1116,13 @@ export default function Subscriptions({ selection, setSelection }) {
           <div style={{ padding: isMobile ? '16px 12px' : 24, overflowY: 'auto', height: '100%' }}>
             <ManageSubs subs={subs} onAdd={addSub} onRemove={removeSub}
               onBulkAdd={bulkAddSubs} onMarkSeen={markAllSeen} />
+          </div>
+        )}
+
+        {/* ── MEGA TAB ── */}
+        {tab === 'mega' && (
+          <div style={{ padding: isMobile ? '16px 12px' : '16px 24px', overflowY: 'auto', height: '100%' }}>
+            <MegaSubscriptions />
           </div>
         )}
       </div>

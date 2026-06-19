@@ -1770,6 +1770,353 @@ def api_import_post():
 from refresh_embed_thumbs import refresh_embed_thumbs
 refresh_embed_thumbs(background=True, quiet=True)
 
+# ── MEGA / Storage-network routes ──────────────────────────────────────────
+
+from mega_handler import (
+    scrape_mega_folder,
+    upload_to_storage_network,
+    download_and_reupload,
+    load_storage_accounts,
+    reload_storage_accounts,
+    _mega_free_bytes,
+    _gdrive_free_bytes,
+    list_mega_account_files,
+    list_gdrive_account_files,
+)
+
+# -- source_subscriptions helpers -------------------------------------------
+
+def _get_source_subs(db):
+    rows = db.execute(
+        "SELECT id, source_kind, url, label, enabled, last_fetched_at, created_at "
+        "FROM source_subscriptions ORDER BY id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _upsert_ext_feed_post(db, source_kind, source_key, **fields):
+    """Insert or ignore an ext_feed_post row."""
+    db.execute(
+        """
+        INSERT INTO ext_feed_posts
+            (source_kind, source_key, source_url, file_url, preview_url,
+             media_type, title, tags, source_meta, status, post_date)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'unseen',%s)
+        ON CONFLICT (source_kind, source_key) DO NOTHING
+        """,
+        (
+            source_kind,
+            source_key,
+            fields.get("source_url"),
+            fields.get("file_url"),
+            fields.get("preview_url"),
+            fields.get("media_type", "image"),
+            fields.get("title"),
+            json.dumps(fields.get("tags", [])),
+            json.dumps(fields.get("source_meta", {})),
+            fields.get("post_date"),
+        ),
+    )
+
+
+# -- GET /api/mega/subscriptions --------------------------------------------
+
+@app.route("/api/mega/subscriptions")
+def api_mega_subscriptions():
+    """List all MEGA folder subscriptions."""
+    db = get_db()
+    try:
+        subs = db.execute(
+            "SELECT * FROM source_subscriptions WHERE source_kind='mega' ORDER BY id"
+        ).fetchall()
+        return jsonify([dict(r) for r in subs])
+    finally:
+        db.close()
+
+
+# -- POST /api/mega/subscriptions -------------------------------------------
+
+@app.route("/api/mega/subscriptions", methods=["POST"])
+def api_mega_add_subscription():
+    """Add a MEGA folder link as a subscription."""
+    body = request.get_json() or {}
+    url   = (body.get("url") or "").strip()
+    label = (body.get("label") or "").strip() or None
+
+    if not url:
+        return jsonify({"error": "url required"}), 400
+
+    import re as _re_mega
+    if not _re_mega.search(r"mega\.nz", url, _re_mega.I):
+        return jsonify({"error": "Only mega.nz URLs are supported here"}), 400
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            INSERT INTO source_subscriptions (source_kind, url, label)
+            VALUES ('mega', %s, %s)
+            ON CONFLICT (url) DO UPDATE SET label = EXCLUDED.label
+            RETURNING id, source_kind, url, label, enabled, last_fetched_at, created_at
+            """,
+            (url, label),
+        ).fetchone()
+        db.commit()
+        return jsonify(dict(row))
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# -- DELETE /api/mega/subscriptions/<id> ------------------------------------
+
+@app.route("/api/mega/subscriptions/<int:sub_id>", methods=["DELETE"])
+def api_mega_remove_subscription(sub_id):
+    db = get_db()
+    try:
+        db.execute("DELETE FROM source_subscriptions WHERE id=%s AND source_kind='mega'", (sub_id,))
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# -- POST /api/mega/subscriptions/<id>/fetch --------------------------------
+
+@app.route("/api/mega/subscriptions/<int:sub_id>/fetch", methods=["POST"])
+def api_mega_fetch_subscription(sub_id):
+    """Scrape a MEGA folder and store file listings in ext_feed_posts."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT * FROM source_subscriptions WHERE id=%s AND source_kind='mega'",
+            (sub_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "subscription not found"}), 404
+
+        mega_url = row["url"]
+        try:
+            files = scrape_mega_folder(mega_url)
+        except Exception as e:
+            return jsonify({"error": f"MEGA scrape failed: {e}"}), 502
+
+        new_count = 0
+        for f in files:
+            before = db.execute(
+                "SELECT id FROM ext_feed_posts WHERE source_kind='mega' AND source_key=%s",
+                (f["id"],)
+            ).fetchone()
+            _upsert_ext_feed_post(
+                db,
+                source_kind="mega",
+                source_key=f["id"],
+                source_url=mega_url,
+                file_url=f["mega_url"],
+                preview_url=None,
+                media_type=f["media_type"],
+                title=f["name"],
+                source_meta={"size": f["size"], "folder_url": mega_url},
+            )
+            if not before:
+                new_count += 1
+
+        db.execute(
+            "UPDATE source_subscriptions SET last_fetched_at=%s WHERE id=%s",
+            (time.time(), sub_id),
+        )
+        db.commit()
+        return jsonify({"status": "ok", "total": len(files), "new": new_count})
+    except Exception as e:
+        db.rollback()
+        logger.exception("mega fetch failed")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# -- GET /api/mega/feed -----------------------------------------------------
+
+@app.route("/api/mega/feed")
+def api_mega_feed():
+    """
+    Return ext_feed_posts for MEGA sources.
+    Query params: status (unseen|saved|ignored|all), limit, offset.
+    """
+    status = request.args.get("status", "unseen")
+    limit  = min(int(request.args.get("limit", 50)), 200)
+    offset = int(request.args.get("offset", 0))
+
+    db = get_db()
+    try:
+        cond  = "" if status == "all" else "AND status = %s"
+        args  = [status] if status != "all" else []
+        rows  = db.execute(
+            f"""
+            SELECT e.*, s.label as sub_label
+            FROM ext_feed_posts e
+            LEFT JOIN source_subscriptions s
+               ON s.url = e.source_url AND s.source_kind = 'mega'
+            WHERE e.source_kind = 'mega' {cond}
+            ORDER BY e.id DESC
+            LIMIT %s OFFSET %s
+            """,
+            (*args, limit, offset),
+        ).fetchall()
+        total = db.execute(
+            f"SELECT COUNT(*) FROM ext_feed_posts WHERE source_kind='mega' {cond}",
+            args,
+        ).fetchone()[0]
+        posts = []
+        for r in rows:
+            d = dict(r)
+            d["tags"] = json.loads(d.get("tags") or "[]")
+            d["source_meta"] = json.loads(d.get("source_meta") or "{}")
+            posts.append(d)
+        return jsonify({"posts": posts, "total": total, "offset": offset})
+    finally:
+        db.close()
+
+
+# -- PATCH /api/mega/feed/<id>/status ---------------------------------------
+
+@app.route("/api/mega/feed/<int:post_id>/status", methods=["PATCH"])
+def api_mega_feed_status(post_id):
+    """Update status of a MEGA feed post (unseen|saved|ignored|unsure)."""
+    body   = request.get_json() or {}
+    status = body.get("status")
+    if status not in ("unseen", "saved", "ignored", "unsure"):
+        return jsonify({"error": "invalid status"}), 400
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE ext_feed_posts SET status=%s WHERE id=%s AND source_kind='mega'",
+            (status, post_id),
+        )
+        db.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        db.close()
+
+
+# -- POST /api/mega/download-and-store --------------------------------------
+
+@app.route("/api/mega/download-and-store", methods=["POST"])
+def api_mega_download_and_store():
+    """
+    Download one or more MEGA feed post files and upload to storage network.
+    Body: { post_ids: [<ext_feed_post id>, ...] }
+    Returns a streaming JSON-lines response with progress per file.
+    """
+    body     = request.get_json() or {}
+    post_ids = body.get("post_ids", [])
+
+    if not post_ids:
+        return jsonify({"error": "post_ids required"}), 400
+
+    db = get_db()
+    try:
+        placeholders = ",".join(["%s"] * len(post_ids))
+        rows = db.execute(
+            f"SELECT * FROM ext_feed_posts WHERE id IN ({placeholders}) AND source_kind='mega'",
+            post_ids,
+        ).fetchall()
+    finally:
+        db.close()
+
+    if not rows:
+        return jsonify({"error": "no matching posts found"}), 404
+
+    def generate():
+        for row in rows:
+            post = dict(row)
+            post_id  = post["id"]
+            file_url = post.get("file_url", "")
+            filename = post.get("title") or f"mega_{post_id}"
+
+            yield json.dumps({"post_id": post_id, "status": "downloading", "filename": filename}) + "\n"
+
+            try:
+                result = download_and_reupload(file_url, filename)
+                share_url = result["share_url"]
+
+                # Update ext_feed_post with the CDN url and mark saved
+                updb = get_db()
+                try:
+                    meta = json.loads(post.get("source_meta") or "{}")
+                    meta["storage_url"]     = share_url
+                    meta["storage_kind"]    = result["kind"]
+                    meta["storage_account"] = result["account_index"]
+                    updb.execute(
+                        "UPDATE ext_feed_posts SET status='saved', file_url=%s, source_meta=%s WHERE id=%s",
+                        (share_url, json.dumps(meta), post_id),
+                    )
+                    updb.commit()
+                finally:
+                    updb.close()
+
+                yield json.dumps({
+                    "post_id":   post_id,
+                    "status":    "done",
+                    "share_url": share_url,
+                    "kind":      result["kind"],
+                    "account":   result["account_index"],
+                }) + "\n"
+
+            except Exception as e:
+                logger.exception("download_and_reupload failed for post %s", post_id)
+                yield json.dumps({"post_id": post_id, "status": "error", "error": str(e)}) + "\n"
+
+    return Response(generate(), mimetype="application/x-ndjson")
+
+
+# -- GET /api/storage/accounts ----------------------------------------------
+
+@app.route("/api/storage/accounts")
+def api_storage_accounts():
+    """Return storage accounts with quota info (passwords redacted)."""
+    accounts = load_storage_accounts()
+    result = []
+    for idx, acc in enumerate(accounts):
+        kind = acc.get("kind", "mega")
+        try:
+            if kind == "mega":
+                free = _mega_free_bytes(acc)
+            elif kind == "gdrive":
+                free = _gdrive_free_bytes(acc)
+            else:
+                free = -1
+        except Exception:
+            free = -1
+
+        quota_bytes = int(acc.get("quota_gb", 50)) * 1024 ** 3
+        result.append({
+            "index":      idx,
+            "kind":       kind,
+            "email":      acc.get("email", acc.get("folder_id", f"account_{idx}")),
+            "quota_gb":   acc.get("quota_gb", 50),
+            "free_bytes": free,
+            "used_bytes": max(0, quota_bytes - free) if free >= 0 else -1,
+        })
+    return jsonify(result)
+
+
+# -- POST /api/storage/reload -----------------------------------------------
+
+@app.route("/api/storage/reload", methods=["POST"])
+def api_storage_reload():
+    """Reload storage accounts from environment."""
+    accounts = reload_storage_accounts()
+    return jsonify({"status": "ok", "count": len(accounts)})
+
 # Ensure schema exists when started via gunicorn (Render, etc.).
 if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
     init_db(quiet=True)
