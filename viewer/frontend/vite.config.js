@@ -10,7 +10,7 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    allowedHosts: ['myviewer.local'],
+    allowedHosts: ['myviewer.local', 'rubbed-issuing-sash.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: 'http://localhost:5002',

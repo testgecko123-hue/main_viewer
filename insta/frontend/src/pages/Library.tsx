@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchPosts, deletePost } from "../api/posts";
+import { fetchSubscriptions } from "../api/subscriptions";
 import type { Post } from "../types/post";
 import PostGrid from "../components/PostGrid";
 import PostModal from "../components/PostModal";
@@ -8,6 +9,10 @@ import LibraryFilters, {
     type SortMode,
 } from "../components/LibraryFilters";
 import { useSelection } from "../context/SelectionContext";
+import {
+    buildDiscoveryFeed,
+    type Subscription,
+} from "../utils/discoveryFeed";
 
 export default function Library() {
     const [posts, setPosts] = useState<Post[]>([]);
@@ -15,11 +20,24 @@ export default function Library() {
     const [sortMode, setSortMode] = useState<SortMode>("default");
     const [userFilter, setUserFilter] = useState("");
     const [shuffleKey, setShuffleKey] = useState(0);
+    const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+    const [discoveryFeed, setDiscoveryFeed] = useState<Post[]>([]);
+    const [discoveryKey, setDiscoveryKey] = useState(0);
     const { remove: removeFromSelection } = useSelection();
 
     useEffect(() => {
         load();
     }, []);
+
+    useEffect(() => {
+        if (sortMode !== "discovery") return;
+        fetchSubscriptions().then(setSubscriptions);
+    }, [sortMode]);
+
+    useEffect(() => {
+        if (sortMode !== "discovery") return;
+        setDiscoveryFeed(buildDiscoveryFeed(posts, subscriptions));
+    }, [posts, subscriptions, sortMode, discoveryKey]);
 
     async function load() {
         const data = await fetchPosts();
@@ -34,9 +52,14 @@ export default function Library() {
     }
 
     const displayed = useMemo(() => {
+        if (sortMode === "discovery") {
+            return userFilter
+                ? discoveryFeed.filter((p) => p.username === userFilter)
+                : discoveryFeed;
+        }
         void shuffleKey;
         return filterAndSortPosts(posts, sortMode, userFilter);
-    }, [posts, sortMode, userFilter, shuffleKey]);
+    }, [posts, sortMode, userFilter, shuffleKey, discoveryFeed]);
 
     function handleSortChange(mode: SortMode) {
         setSortMode(mode);
@@ -65,6 +88,7 @@ export default function Library() {
                 onSortChange={handleSortChange}
                 onUserFilterChange={setUserFilter}
                 onReshuffle={() => setShuffleKey((k) => k + 1)}
+                onResort={() => setDiscoveryKey((k) => k + 1)}
             />
             <PostGrid posts={displayed} onSelect={setSelected} />
             <PostModal

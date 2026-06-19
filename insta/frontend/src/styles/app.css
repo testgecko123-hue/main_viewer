@@ -348,6 +348,15 @@ a:hover {
 }
 
 /* ── Post grid ───────────────────────────────────────────── */
+.post-grid-virtual {
+  width: 100%;
+}
+
+.post-grid-virtual__spacer {
+  width: 100%;
+  pointer-events: none;
+}
+
 .post-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -363,6 +372,8 @@ a:hover {
   border: 1px solid var(--border);
   transition: border 0.15s, transform 0.18s, box-shadow 0.18s;
   position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: 180px 230px;
 }
 
 .post-card:hover {
@@ -391,6 +402,36 @@ a:hover {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.post-card__thumb--loading {
+  background: linear-gradient(135deg, #141312 0%, #1e1d1b 100%);
+}
+
+.post-card__thumb--video {
+  background: linear-gradient(135deg, #121110 0%, #1a1917 50%, #121110 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.post-card__play {
+  font-size: 28px;
+  color: rgba(255, 255, 255, 0.35);
+  line-height: 1;
+  user-select: none;
+}
+
+.post-card__media-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
 }
 
 .post-card__badge {

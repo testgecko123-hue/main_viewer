@@ -60,6 +60,22 @@ const MediaRenderer = forwardRef<MediaRendererHandle, Props>(function MediaRende
     }, [postKey]);
 
     useEffect(() => {
+        // Capture the key at mount time. The cleanup will only abort the video
+        // that was playing for *this* postKey — it never touches a freshly
+        // mounted element that already belongs to the next post.
+        const keyAtMount = postKey;
+        return () => {
+            const el = videoRef.current;
+            if (!el) return;
+            // If the ref already points to a new post's element, leave it alone.
+            if (el.dataset.postKey && el.dataset.postKey !== keyAtMount) return;
+            el.pause();
+            el.removeAttribute("src");
+            el.load();
+        };
+    }, [postKey]);
+
+    useEffect(() => {
         if (carouselIdx >= carouselTotal && carouselTotal > 0) {
             setCarouselIdx(0);
         }
@@ -130,7 +146,9 @@ const MediaRenderer = forwardRef<MediaRendererHandle, Props>(function MediaRende
                     ref={videoRef}
                     key={post.localFile}
                     src={mediaSrc(post.localFile)}
+                    data-post-key={postKey}
                     controls
+                    preload="metadata"
                     className="media-element"
                     style={mediaStyle}
                 />
@@ -154,7 +172,9 @@ const MediaRenderer = forwardRef<MediaRendererHandle, Props>(function MediaRende
                         ref={videoRef}
                         key={current}
                         src={mediaSrc(current)}
+                        data-post-key={postKey}
                         controls
+                        preload="metadata"
                         className="media-element"
                         style={mediaStyle}
                     />
@@ -164,6 +184,8 @@ const MediaRenderer = forwardRef<MediaRendererHandle, Props>(function MediaRende
                         className="media-element"
                         style={mediaStyle}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                     />
                 )}
 
@@ -227,6 +249,8 @@ const MediaRenderer = forwardRef<MediaRendererHandle, Props>(function MediaRende
                     className="media-element"
                     style={mediaStyle}
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                 />
             </div>
         );

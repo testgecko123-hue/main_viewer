@@ -181,7 +181,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
   // ── Progress bar animation ────────────────────────────────────────────────
   useEffect(() => {
     clearInterval(progressTimer.current)
-    if (imgLoaded || !postData) return
+    if (imgLoaded || !postData || postData.media_type === 'embed') return
     setProgress(0)
     progressTimer.current = setInterval(() => {
       setProgress(p => {
@@ -433,7 +433,13 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
   const embedSrcRef = useRef('')
   if (isEmbed && postData) {
     const newSrc = postData.file_url || postData.cdn_url || ''
-    if (newSrc !== embedSrcRef.current) embedSrcRef.current = newSrc
+
+    console.log('EMBED URL:', newSrc)
+    console.log('POST DATA:', postData)
+
+    if (newSrc !== embedSrcRef.current) {
+      embedSrcRef.current = newSrc
+    }
   }
 
   // Preload bar colours
@@ -485,7 +491,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         )}
 
         {/* Preview thumbnail while full image loads */}
-        {postData && !isVideo && !comicActive && !imgLoaded && (postData.thumb_cdn || postData.cdn_url) && (
+        {postData && !isVideo && !isEmbed && !comicActive && !imgLoaded && (postData.thumb_cdn || postData.cdn_url) && (
           <img
             src={postData.thumb_cdn || postData.cdn_url}
             alt=""
@@ -504,7 +510,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         )}
 
         {/* Normal image or comic carousel page */}
-        {postData && !isVideo && !comicActive && (
+        {postData && !isVideo && !isEmbed && !comicActive && (
           <img
             key={comicCarouselActive ? `${postData.id}-${comicPageIdx}` : postData.id}
             src={comicImageUrl}
@@ -640,13 +646,12 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
       {/* ── Embed iframe (Pornhub etc) — full-screen, outside pointer-events:none div ── */}
       {isEmbed && postData && embedSrcRef.current && (
         <iframe
-          key={postData.id}
           src={embedSrcRef.current}
           frameBorder="0"
           allowFullScreen
-          loading="lazy"
           scrolling="no"
-          allow="autoplay; fullscreen"
+          allow="autoplay; fullscreen; encrypted-media"
+          onLoad={() => setImgLoaded(true)}
           style={{
             position: 'absolute',
             inset: 0,
@@ -1249,7 +1254,7 @@ export default function Viewer({ selection, setSelection, viewIds, startIndex, o
         </button>
       )}
 
-      {postData && !isVideo && !isComic && !comicCarouselActive && (
+      {postData && !isVideo && !isComic && !isEmbed && !comicCarouselActive && (
         <button
           className="btn-surface"
           onClick={() => {

@@ -4,6 +4,7 @@ import type { Post } from "../types/post";
 export type SortMode =
     | "default"
     | "random"
+    | "discovery"
     | "instagram_newest"
     | "instagram_oldest"
     | "saved_newest"
@@ -17,6 +18,7 @@ type Props = {
     onSortChange: (mode: SortMode) => void;
     onUserFilterChange: (username: string) => void;
     onReshuffle?: () => void;
+    onResort?: () => void;
 };
 
 function shuffle<T>(arr: T[]): T[] {
@@ -82,6 +84,7 @@ export default function LibraryFilters({
     onSortChange,
     onUserFilterChange,
     onReshuffle,
+    onResort,
 }: Props) {
     const usernames = useMemo(() => {
         const set = new Set<string>();
@@ -108,6 +111,7 @@ export default function LibraryFilters({
                     >
                         <option value="default">Default order</option>
                         <option value="random">Random</option>
+                        <option value="discovery">Discover (Mixed)</option>
                         <optgroup label="Instagram date">
                             <option value="instagram_newest">Newest on Instagram</option>
                             <option value="instagram_oldest">Oldest on Instagram</option>
@@ -125,6 +129,17 @@ export default function LibraryFilters({
                             onClick={onReshuffle}
                             title="Reshuffle"
                             aria-label="Reshuffle random order"
+                        >
+                            ↻
+                        </button>
+                    )}
+                    {sortMode === "discovery" && onResort && (
+                        <button
+                            type="button"
+                            className="library-shuffle-btn"
+                            onClick={onResort}
+                            title="Resort"
+                            aria-label="Resort discovery feed"
                         >
                             ↻
                         </button>
