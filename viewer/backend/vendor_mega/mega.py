@@ -196,7 +196,13 @@ class Mega:
             data=json.dumps(data),
             timeout=self.timeout,
         )
-        json_resp = json.loads(response.text)
+        try:
+            json_resp = json.loads(response.text)
+        except json.JSONDecodeError:
+            raise RequestError(
+                f"MEGA returned a non-JSON response (HTTP {response.status_code}): "
+                f"{response.text[:300]!r}"
+            ) from None
         try:
             if isinstance(json_resp, list):
                 int_resp = json_resp[0] if isinstance(json_resp[0],
