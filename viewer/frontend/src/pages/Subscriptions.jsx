@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { gridCols, GRID } from '../config/gridConfig.js'
 import { apiFetch, apiEventSource } from '../utils/api.js'
 import useIsMobile from '../hooks/useIsMobile.js'
-import MegaSubscriptions from '../components/MegaSubscriptions.jsx'
+import MegaImport from '../components/MegaImport.jsx'
 
 function loadStored(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback }
@@ -856,7 +856,7 @@ export default function Subscriptions({ selection, setSelection }) {
           padding: '0 20px',
           display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0,
         }}>
-          {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE'],['mega','🔴 MEGA']].map(([t, label]) => (
+          {[['feed','FEED'],['browse','BROWSE'],['manage','MANAGE'],['mega','📥 MEGA']].map(([t, label]) => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: '12px 16px',
               fontSize: '0.7rem',
@@ -1122,7 +1122,7 @@ export default function Subscriptions({ selection, setSelection }) {
         {/* ── MEGA TAB ── */}
         {tab === 'mega' && (
           <div style={{ padding: isMobile ? '16px 12px' : '16px 24px', overflowY: 'auto', height: '100%' }}>
-            <MegaSubscriptions />
+            <MegaImport />
           </div>
         )}
       </div>

@@ -10,8 +10,6 @@ psycopg2-binary>=2.9
 python-dotenv>=1.0
 beautifulsoup4>=4.12
 duckdb
-# MEGA + Google Drive storage
-mega.py>=1.0.8
-google-api-python-client>=2.0
-google-auth-httplib2>=0.2
-google-auth-oauthlib>=1.0
+# MEGA storage (user's own account) — uses backend/vendor_mega/, a vendored
+# copy of mega.py with its broken tenacity<6.0.0 pin removed (see mega_account.py)
+pycryptodome>=3.19

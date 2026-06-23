@@ -18,7 +18,7 @@ import json
 import requests
 import urllib.parse
 from datetime import date, datetime
-from flask import Flask, jsonify, request, make_response, Response
+from flask import Flask, jsonify, request, make_response, Response, send_file
 from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from database import (
@@ -1770,353 +1770,230 @@ def api_import_post():
 from refresh_embed_thumbs import refresh_embed_thumbs
 refresh_embed_thumbs(background=True, quiet=True)
 
-# ── MEGA / Storage-network routes ──────────────────────────────────────────
+# ── MEGA import (user's own MEGA.nz account) ────────────────────────────────
+#
+# Pick a local folder in the browser → each image/video gets uploaded to the
+# user's own MEGA account and imported straight into the library with
+# whatever tags were chosen, in one request per file. Media is served back
+# out through /api/mega/stream/<handle>/<filename>, which downloads +
+# decrypts from MEGA on first request and caches the plaintext locally.
 
-from mega_handler import (
-    scrape_mega_folder,
-    upload_to_storage_network,
-    download_and_reupload,
-    load_storage_accounts,
-    reload_storage_accounts,
-    _mega_free_bytes,
-    _gdrive_free_bytes,
-    list_mega_account_files,
-    list_gdrive_account_files,
-)
-
-# -- source_subscriptions helpers -------------------------------------------
-
-def _get_source_subs(db):
-    rows = db.execute(
-        "SELECT id, source_kind, url, label, enabled, last_fetched_at, created_at "
-        "FROM source_subscriptions ORDER BY id"
-    ).fetchall()
-    return [dict(r) for r in rows]
+import mimetypes
+import tempfile
+from pathlib import Path as _Path
+import mega_account
 
 
-def _upsert_ext_feed_post(db, source_kind, source_key, **fields):
-    """Insert or ignore an ext_feed_post row."""
-    db.execute(
-        """
-        INSERT INTO ext_feed_posts
-            (source_kind, source_key, source_url, file_url, preview_url,
-             media_type, title, tags, source_meta, status, post_date)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'unseen',%s)
-        ON CONFLICT (source_kind, source_key) DO NOTHING
-        """,
-        (
-            source_kind,
-            source_key,
-            fields.get("source_url"),
-            fields.get("file_url"),
-            fields.get("preview_url"),
-            fields.get("media_type", "image"),
-            fields.get("title"),
-            json.dumps(fields.get("tags", [])),
-            json.dumps(fields.get("source_meta", {})),
-            fields.get("post_date"),
-        ),
-    )
+def _normalize_mega_tag(tag) -> str:
+    return re.sub(r"\s+", "_", str(tag).strip().lower())
 
 
-# -- GET /api/mega/subscriptions --------------------------------------------
+# -- GET /api/mega/status ----------------------------------------------------
 
-@app.route("/api/mega/subscriptions")
-def api_mega_subscriptions():
-    """List all MEGA folder subscriptions."""
+@app.route("/api/mega/status")
+def api_mega_status():
+    """Whether MEGA is configured/reachable, plus quota for the import UI."""
+    return jsonify(mega_account.get_account_status())
+
+
+# -- GET /api/mega/folders ----------------------------------------------------
+
+@app.route("/api/mega/folders")
+def api_mega_folders():
+    """Existing batch-folder names under the root upload folder (autocomplete)."""
+    if not mega_account.configured():
+        return jsonify([])
+    try:
+        return jsonify(mega_account.list_batch_folders())
+    except Exception as e:
+        logger.exception("mega list_batch_folders failed")
+        return jsonify({"error": str(e)}), 502
+
+
+# -- GET /api/mega/import-options ---------------------------------------------
+
+@app.route("/api/mega/import-options")
+def api_mega_import_options():
+    """
+    Existing source_type / media_category / MEGA-folder values already in
+    use, so the import form can offer them as suggestions instead of the
+    user having to remember exactly what they typed last time.
+    """
     db = get_db()
     try:
-        subs = db.execute(
-            "SELECT * FROM source_subscriptions WHERE source_kind='mega' ORDER BY id"
+        source_rows = db.execute(
+            "SELECT DISTINCT source_type AS v FROM posts "
+            "WHERE source_type IS NOT NULL AND source_type <> '' ORDER BY v"
         ).fetchall()
-        return jsonify([dict(r) for r in subs])
+        category_rows = db.execute(
+            "SELECT DISTINCT media_category AS v FROM posts "
+            "WHERE media_category IS NOT NULL AND media_category <> '' ORDER BY v"
+        ).fetchall()
     finally:
         db.close()
 
+    sources    = [r["v"] for r in source_rows]
+    categories = [r["v"] for r in category_rows]
 
-# -- POST /api/mega/subscriptions -------------------------------------------
+    # Always offer sensible defaults even on a fresh/empty library.
+    for default in ("mega_own", "mega"):
+        if default not in sources:
+            sources.insert(0, default)
+    if "library" not in categories:
+        categories.insert(0, "library")
 
-@app.route("/api/mega/subscriptions", methods=["POST"])
-def api_mega_add_subscription():
-    """Add a MEGA folder link as a subscription."""
-    body = request.get_json() or {}
-    url   = (body.get("url") or "").strip()
-    label = (body.get("label") or "").strip() or None
-
-    if not url:
-        return jsonify({"error": "url required"}), 400
-
-    import re as _re_mega
-    if not _re_mega.search(r"mega\.nz", url, _re_mega.I):
-        return jsonify({"error": "Only mega.nz URLs are supported here"}), 400
-
-    db = get_db()
-    try:
-        row = db.execute(
-            """
-            INSERT INTO source_subscriptions (source_kind, url, label)
-            VALUES ('mega', %s, %s)
-            ON CONFLICT (url) DO UPDATE SET label = EXCLUDED.label
-            RETURNING id, source_kind, url, label, enabled, last_fetched_at, created_at
-            """,
-            (url, label),
-        ).fetchone()
-        db.commit()
-        return jsonify(dict(row))
-    except Exception as e:
-        db.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        db.close()
-
-
-# -- DELETE /api/mega/subscriptions/<id> ------------------------------------
-
-@app.route("/api/mega/subscriptions/<int:sub_id>", methods=["DELETE"])
-def api_mega_remove_subscription(sub_id):
-    db = get_db()
-    try:
-        db.execute("DELETE FROM source_subscriptions WHERE id=%s AND source_kind='mega'", (sub_id,))
-        db.commit()
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        db.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        db.close()
-
-
-# -- POST /api/mega/subscriptions/<id>/fetch --------------------------------
-
-@app.route("/api/mega/subscriptions/<int:sub_id>/fetch", methods=["POST"])
-def api_mega_fetch_subscription(sub_id):
-    """Scrape a MEGA folder and store file listings in ext_feed_posts."""
-    db = get_db()
-    try:
-        row = db.execute(
-            "SELECT * FROM source_subscriptions WHERE id=%s AND source_kind='mega'",
-            (sub_id,)
-        ).fetchone()
-        if not row:
-            return jsonify({"error": "subscription not found"}), 404
-
-        mega_url = row["url"]
+    folders = []
+    if mega_account.configured():
         try:
-            files = scrape_mega_folder(mega_url)
-        except Exception as e:
-            return jsonify({"error": f"MEGA scrape failed: {e}"}), 502
-
-        new_count = 0
-        for f in files:
-            before = db.execute(
-                "SELECT id FROM ext_feed_posts WHERE source_kind='mega' AND source_key=%s",
-                (f["id"],)
-            ).fetchone()
-            _upsert_ext_feed_post(
-                db,
-                source_kind="mega",
-                source_key=f["id"],
-                source_url=mega_url,
-                file_url=f["mega_url"],
-                preview_url=None,
-                media_type=f["media_type"],
-                title=f["name"],
-                source_meta={"size": f["size"], "folder_url": mega_url},
-            )
-            if not before:
-                new_count += 1
-
-        db.execute(
-            "UPDATE source_subscriptions SET last_fetched_at=%s WHERE id=%s",
-            (time.time(), sub_id),
-        )
-        db.commit()
-        return jsonify({"status": "ok", "total": len(files), "new": new_count})
-    except Exception as e:
-        db.rollback()
-        logger.exception("mega fetch failed")
-        return jsonify({"error": str(e)}), 500
-    finally:
-        db.close()
-
-
-# -- GET /api/mega/feed -----------------------------------------------------
-
-@app.route("/api/mega/feed")
-def api_mega_feed():
-    """
-    Return ext_feed_posts for MEGA sources.
-    Query params: status (unseen|saved|ignored|all), limit, offset.
-    """
-    status = request.args.get("status", "unseen")
-    limit  = min(int(request.args.get("limit", 50)), 200)
-    offset = int(request.args.get("offset", 0))
-
-    db = get_db()
-    try:
-        cond      = "" if status == "all" else "AND status = %s"
-        args      = (status,) if status != "all" else ()
-        rows      = db.execute(
-            f"""
-            SELECT e.*, s.label as sub_label
-            FROM ext_feed_posts e
-            LEFT JOIN source_subscriptions s
-               ON s.url = e.source_url AND s.source_kind = 'mega'
-            WHERE e.source_kind = 'mega' {cond}
-            ORDER BY e.id DESC
-            LIMIT %s OFFSET %s
-            """,
-            (*args, limit, offset),
-        ).fetchall()
-        count_row = db.execute(
-            f"SELECT COUNT(*) AS n FROM ext_feed_posts WHERE source_kind='mega' {cond}",
-            args,
-        ).fetchone()
-        total = count_row["n"] if count_row else 0
-        posts = []
-        for r in rows:
-            d = dict(r)
-            d["tags"]        = json.loads(d.get("tags") or "[]")
-            d["source_meta"] = json.loads(d.get("source_meta") or "{}")
-            posts.append(d)
-        return jsonify({"posts": posts, "total": total, "offset": offset})
-    finally:
-        db.close()
-
-
-# -- PATCH /api/mega/feed/<id>/status ---------------------------------------
-
-@app.route("/api/mega/feed/<int:post_id>/status", methods=["PATCH"])
-def api_mega_feed_status(post_id):
-    """Update status of a MEGA feed post (unseen|saved|ignored|unsure)."""
-    body   = request.get_json() or {}
-    status = body.get("status")
-    if status not in ("unseen", "saved", "ignored", "unsure"):
-        return jsonify({"error": "invalid status"}), 400
-    db = get_db()
-    try:
-        db.execute(
-            "UPDATE ext_feed_posts SET status=%s WHERE id=%s AND source_kind='mega'",
-            (status, post_id),
-        )
-        db.commit()
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        db.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        db.close()
-
-
-# -- POST /api/mega/download-and-store --------------------------------------
-
-@app.route("/api/mega/download-and-store", methods=["POST"])
-def api_mega_download_and_store():
-    """
-    Download one or more MEGA feed post files and upload to storage network.
-    Body: { post_ids: [<ext_feed_post id>, ...] }
-    Returns a streaming JSON-lines response with progress per file.
-    """
-    body     = request.get_json() or {}
-    post_ids = body.get("post_ids", [])
-
-    if not post_ids:
-        return jsonify({"error": "post_ids required"}), 400
-
-    db = get_db()
-    try:
-        placeholders = ",".join(["%s"] * len(post_ids))
-        rows = db.execute(
-            f"SELECT * FROM ext_feed_posts WHERE id IN ({placeholders}) AND source_kind='mega'",
-            post_ids,
-        ).fetchall()
-    finally:
-        db.close()
-
-    if not rows:
-        return jsonify({"error": "no matching posts found"}), 404
-
-    def generate():
-        for row in rows:
-            post = dict(row)
-            post_id  = post["id"]
-            file_url = post.get("file_url", "")
-            filename = post.get("title") or f"mega_{post_id}"
-
-            yield json.dumps({"post_id": post_id, "status": "downloading", "filename": filename}) + "\n"
-
-            try:
-                result = download_and_reupload(file_url, filename)
-                share_url = result["share_url"]
-
-                # Update ext_feed_post with the CDN url and mark saved
-                updb = get_db()
-                try:
-                    meta = json.loads(post.get("source_meta") or "{}")
-                    meta["storage_url"]     = share_url
-                    meta["storage_kind"]    = result["kind"]
-                    meta["storage_account"] = result["account_index"]
-                    updb.execute(
-                        "UPDATE ext_feed_posts SET status='saved', file_url=%s, source_meta=%s WHERE id=%s",
-                        (share_url, json.dumps(meta), post_id),
-                    )
-                    updb.commit()
-                finally:
-                    updb.close()
-
-                yield json.dumps({
-                    "post_id":   post_id,
-                    "status":    "done",
-                    "share_url": share_url,
-                    "kind":      result["kind"],
-                    "account":   result["account_index"],
-                }) + "\n"
-
-            except Exception as e:
-                logger.exception("download_and_reupload failed for post %s", post_id)
-                yield json.dumps({"post_id": post_id, "status": "error", "error": str(e)}) + "\n"
-
-    return Response(generate(), mimetype="application/x-ndjson")
-
-
-# -- GET /api/storage/accounts ----------------------------------------------
-
-@app.route("/api/storage/accounts")
-def api_storage_accounts():
-    """Return storage accounts with quota info (passwords redacted)."""
-    accounts = load_storage_accounts()
-    result = []
-    for idx, acc in enumerate(accounts):
-        kind = acc.get("kind", "mega")
-        try:
-            if kind == "mega":
-                free = _mega_free_bytes(acc)
-            elif kind == "gdrive":
-                free = _gdrive_free_bytes(acc)
-            else:
-                free = -1
+            folders = mega_account.list_batch_folders()
         except Exception:
-            free = -1
+            logger.exception("mega list_batch_folders failed in import-options")
 
-        quota_bytes = int(acc.get("quota_gb", 50)) * 1024 ** 3
-        result.append({
-            "index":      idx,
-            "kind":       kind,
-            "email":      acc.get("email", acc.get("folder_id", f"account_{idx}")),
-            "quota_gb":   acc.get("quota_gb", 50),
-            "free_bytes": free,
-            "used_bytes": max(0, quota_bytes - free) if free >= 0 else -1,
+    return jsonify({"sources": sources, "categories": categories, "folders": folders})
+
+
+# -- POST /api/mega/upload ----------------------------------------------------
+
+@app.route("/api/mega/upload", methods=["POST"])
+def api_mega_upload():
+    """
+    Upload ONE file to the user's own MEGA account and import it into the
+    library, in a single request. Called once per file by the folder-import
+    UI so per-file progress/errors can be shown as the batch runs.
+
+    Multipart form fields:
+      file           - the file itself (required)
+      folder         - MEGA folder name to upload into, under MEGA_ROOT_FOLDER
+                       (required; usually the picked local folder's name)
+      tags           - JSON array of tag strings to apply to every file in
+                       this batch
+      source_type    - value to store as the post's `source_type` (e.g.
+                       "mega", "mega_own", "personal_backup"...). Defaults
+                       to "mega_own".
+      media_category - value to store as the post's `media_category` (e.g.
+                       "library", "collection"...). Defaults to "library".
+      media_type     - override auto-detected image/video classification
+                       ("image" or "video"). Normally left blank so the
+                       extension-based detection below is used.
+      relative_path  - original path within the picked folder (optional,
+                       stored for reference only)
+    """
+    if not mega_account.configured():
+        return jsonify({
+            "error": "MEGA is not configured on the server. Set MEGA_EMAIL "
+                     "and MEGA_PASSWORD in the backend .env."
+        }), 400
+
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "file is required"}), 400
+
+    folder         = (request.form.get("folder") or "Import").strip() or "Import"
+    source_type    = (request.form.get("source_type") or "mega_own").strip() or "mega_own"
+    media_category = (request.form.get("media_category") or "library").strip() or "library"
+
+    try:
+        raw_tags = json.loads(request.form.get("tags") or "[]")
+    except Exception:
+        raw_tags = []
+    tags = []
+    for t in raw_tags:
+        norm = _normalize_mega_tag(t)
+        if norm and norm not in tags:
+            tags.append(norm)
+
+    filename   = os.path.basename(uploaded.filename)
+    media_type = (request.form.get("media_type") or "").strip().lower() or None
+    if media_type not in ("image", "video"):
+        media_type = mega_account.infer_media_type(filename)
+    if media_type not in ("image", "video"):
+        return jsonify({
+            "status": "skipped",
+            "filename": filename,
+            "reason": "not an image or video file",
         })
-    return jsonify(result)
+
+    suffix = _Path(filename).suffix
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="mega_up_")
+    os.close(tmp_fd)
+
+    try:
+        uploaded.save(tmp_path)
+
+        folder_node_id = mega_account.ensure_batch_folder(folder)
+        result = mega_account.upload_file(tmp_path, filename, folder_node_id)
+        mega_account.seed_cache(result["handle"], tmp_path, result["name"])
+
+        base = (os.environ.get("MEGA_PUBLIC_BASE_URL") or request.host_url).rstrip("/")
+        file_url = f"{base}/api/mega/stream/{result['handle']}/{urllib.parse.quote(result['name'])}"
+
+        fields = {
+            "file_url":       file_url,
+            "cdn_url":        file_url,
+            "thumb_cdn":      file_url,
+            "hub_url":        None,
+            "media_type":     media_type,
+            "media_category": media_category,
+            "source_type":    source_type,
+            "tags":           tags,
+            "resolved_by":    "mega_own_upload",
+            "title":          filename,
+            "source_meta": {
+                "mega_handle":    result["handle"],
+                "mega_name":      result["name"],
+                "size":           result["size"],
+                "batch_folder":   folder,
+                "relative_path":  request.form.get("relative_path") or filename,
+            },
+        }
+
+        db = get_db()
+        try:
+            post_id, already = import_post(db, fields)
+            post = get_post_with_tags(db, post_id)
+        finally:
+            db.close()
+
+        return jsonify({
+            "status":      "already_saved" if already else "ok",
+            "id":          post_id,
+            "post":        post,
+            "mega_handle": result["handle"],
+            "filename":    filename,
+        })
+
+    except Exception as e:
+        logger.exception("MEGA upload failed for %s", filename)
+        return jsonify({"error": str(e), "filename": filename}), 500
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 
-# -- POST /api/storage/reload -----------------------------------------------
+# -- GET /api/mega/stream/<handle>/<filename> --------------------------------
 
-@app.route("/api/storage/reload", methods=["POST"])
-def api_storage_reload():
-    """Reload storage accounts from environment."""
-    accounts = reload_storage_accounts()
-    return jsonify({"status": "ok", "count": len(accounts)})
+@app.route("/api/mega/stream/<handle>/<path:filename>")
+def api_mega_stream(handle, filename):
+    """
+    Serve a file out of the user's own MEGA account. Downloads + decrypts
+    from MEGA on first request and caches the plaintext locally so repeat
+    views/scrubbing don't re-hit MEGA every time.
+    """
+    if not mega_account.configured():
+        return jsonify({"error": "MEGA is not configured"}), 404
+
+    try:
+        path = mega_account.get_cached_or_download(handle, filename)
+    except FileNotFoundError:
+        return jsonify({"error": "file not found"}), 404
+    except Exception as e:
+        logger.exception("MEGA stream failed for %s", handle)
+        return jsonify({"error": str(e)}), 502
+
+    mimetype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return send_file(path, mimetype=mimetype, conditional=True, download_name=filename)
 
 # Ensure schema exists when started via gunicorn (Render, etc.).
 if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':

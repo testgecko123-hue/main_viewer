@@ -4,7 +4,7 @@ export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
 /** Auth token for remote/mobile API calls (matches backend VIEWER_AUTH_TOKEN). */
 const AUTH_TOKEN = (import.meta.env.VITE_AUTH_TOKEN ?? '').trim()
 
-function authHeaders() {
+export function authHeaders() {
   if (!AUTH_TOKEN || !API_BASE) return {}
   return { 'X-Viewer-Token': AUTH_TOKEN }
 }

@@ -20,7 +20,8 @@ The React frontend can also be built as an **Android app** via [Capacitor](https
 ```
 viewer/
 ├── android/          Capacitor Android project (Gradle) — build APK/AAB here
-├── backend/          Flask API (app.py, database.py, db.py, supabase_schema.sql)
+├── backend/          Flask API (app.py, database.py, db.py, supabase_schema.sql,
+│                     mega_account.py, vendor_mega/)
 ├── frontend/         React UI
 ├── capacitor.config.ts
 ├── package.json      Capacitor CLI scripts (build:android, cap:open, …)
@@ -193,12 +194,34 @@ Collections, selections, subscriptions, and the library stay in sync because the
 
 - **Library** — Tag search (needed / optional / exclude), filters, post detail, R34 auto-match
 - **Subscriptions** — Follow Rule34 tags, fetch new posts, triage feed (save / skip / later)
+- **MEGA import** — Pick a local folder, upload every image/video in it to your own MEGA.nz account, and import it straight into the library with whatever tags/source/category you choose. See [MEGA import setup](#mega-import-setup) below.
 - **Random** — Random sample from the library with filters
 - **Collections** — Named saved lists with optional review queues
 - **Selection** — Working ordered list of post IDs (persisted on the server)
 - **Viewer** — Full-screen image/video viewer with keyboard shortcuts
 - **Tag groups** — Alias tags for search expansion
 - **R34 Search** — Direct Rule34 API search
+
+## MEGA import setup
+
+The **MEGA** tab in Subscriptions lets you upload a local folder of images/videos
+straight to your own MEGA.nz account and into your library, in one go.
+
+Add to `viewer/.env`:
+
+```
+MEGA_EMAIL=you@example.com
+MEGA_PASSWORD=your-mega-password
+MEGA_ROOT_FOLDER=ViewerUploads   # optional, this is the default
+```
+
+Restart the backend. The MEGA tab will show your account's connection status
+and storage quota once configured. Files land in
+`MEGA_ROOT_FOLDER/<folder name you choose>` on your MEGA drive, and the
+backend decrypts/streams them back out on demand (cached locally after the
+first view) so they play directly in the viewer — no separate MEGA app or
+plaintext link needed.
+
 
 ## Auth (LAN / remote / mobile)
 
@@ -220,3 +243,5 @@ See [deploy.md](deploy.md) for Render.com setup. Set `DATABASE_URL` in the host 
 - Instagram scraping, CDN proxy, `ig_subscriptions`
 - Taste engine (CLIP embeddings, predictions, UMAP, generate-selection)
 - Offline sql.js mobile build (Android now uses the remote Flask API)
+- Public MEGA-folder scraping + multi-account storage network + Google Drive
+  (replaced by direct import from your own MEGA account, see above)
